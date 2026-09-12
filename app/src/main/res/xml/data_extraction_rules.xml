@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ 数据提取规则（云备份 / 设备间迁移） -->
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- 备份服务器配置与下载记录，排除音乐文件本体（体积大且可重新下载） -->
+        <include domain="sharedpref" path="." />
+        <exclude domain="external" path="music" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="sharedpref" path="." />
+        <exclude domain="external" path="music" />
+    </device-transfer>
+</data-extraction-rules>

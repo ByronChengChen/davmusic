@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider 路径配置：用于把下载到 App 私有目录的文件暴露给播放器/其他应用 -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 下载缓存目录（getExternalFilesDir("music")） -->
+    <external-files-path
+        name="music"
+        path="music/" />
+
+    <!-- 外部存储根目录下的 files -->
+    <external-files-path
+        name="external_files"
+        path="." />
+
+    <!-- 内部缓存目录 -->
+    <cache-path
+        name="cache"
+        path="." />
+
+    <!-- 内部 files 目录 -->
+    <files-path
+        name="files"
+        path="." />
+
+</paths>
