@@ -338,17 +338,21 @@ public class MainActivity extends AppCompatActivity implements
     }
     
     private void navigateToFolder(WebDAVFile folder) {
-        // 保存当前路径到栈
+        // 保存当前路径到栈，供返回时恢复
         pathStack.add(currentPath);
-        
-        // 更新当前路径
-        String folderName = folder.getDisplayName();
-        if (currentPath.equals("/")) {
-            currentPath = "/" + folderName;
+
+        // 直接使用解析阶段得到的相对路径（已剥离 baseUrl 前缀并 URL 解码），
+        // 避免用 displayName 拼接导致路径重复、中文编码错误等问题。
+        String rel = folder.getRelativePath();
+        if (rel != null && !rel.isEmpty()) {
+            currentPath = "/" + rel;
         } else {
-            currentPath = currentPath + "/" + folderName;
+            // 兜底：relativePath 缺失时用 displayName 拼接
+            String name = folder.getDisplayName();
+            if (name == null) name = "";
+            currentPath = currentPath.equals("/") ? "/" + name : currentPath + "/" + name;
         }
-        
+
         // 加载新路径
         loadCurrentPath();
     }

@@ -5,6 +5,7 @@ import java.util.Date;
 public class WebDAVFile {
     private String href;
     private String displayName;
+    private String relativePath;   // 剥离 baseUrl 并 URL 解码后的相对路径，如 "cmcc/music/苏慧伦"
     private long contentLength;
     private String contentType;
     private long lastModified;
@@ -33,6 +34,14 @@ public class WebDAVFile {
 
     public String getDisplayName() {
         return displayName;
+    }
+
+    public String getRelativePath() {
+        return relativePath;
+    }
+
+    public void setRelativePath(String relativePath) {
+        this.relativePath = relativePath;
     }
 
     public void setDisplayName(String displayName) {
