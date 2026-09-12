@@ -114,7 +114,7 @@ public class WebDAVClient {
                 try {
                     if (response.isSuccessful()) {
                         String xml = response.body().string();
-                        List<WebDAVFile> files = parsePropfindResponse(xml);
+                        List<WebDAVFile> files = parsePropfindResponse(xml, path);
                         callback.onSuccess(files);
                     } else {
                         callback.onError(new Exception("HTTP " + response.code() + ": " + response.message()));
@@ -333,13 +333,18 @@ public class WebDAVClient {
 
     // 解析 PROPFIND 响应
     //
-    // 关于 href 的处理（关键，曾导致路径错乱与 404）：
+    // 关于 href 的处理（关键，曾导致路径错乱、404、同名文件夹重复）：
     //   - 服务器返回的 href 形如 "/dav/cmcc/music/"，是【以 URL 的 path 部分为基准】
     //     的绝对路径，不含 scheme/host。因此不能用 baseUrl（含 https://host）去剥前缀。
     //   - 正确做法：取出 baseUrl 的 path（如 "/dav/"），剥离它，再按 "/" 逐段拆分。
     //   - href 中的中文等非 ASCII 字符是 URL 编码的（%E5%9B%BD%E8%AF%AD），
     //     必须 URL 解码后再作显示名与路径，否则会乱码、且拼接出的请求 URL 打不开。
-    private List<WebDAVFile> parsePropfindResponse(String xml) throws Exception {
+    //   - PROPFIND Depth:1 的响应【首条通常是目录自身】，必须剔除，否则界面会
+    //     出现与当前目录同名的文件夹。判断方式：与当前请求路径比较，而不是
+    //     判断相对路径是否为空（请求 /cmcc/ 时自身的 relPath 恰为 "cmcc"，非空）。
+    //
+    // @param requestedPath 本次请求的路径（如 "/cmcc" 或 "/"），用于识别并剔除目录自身
+    private List<WebDAVFile> parsePropfindResponse(String xml, String requestedPath) throws Exception {
         List<WebDAVFile> files = new ArrayList<>();
 
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
@@ -350,7 +355,9 @@ public class WebDAVClient {
         // 计算 baseUrl 的 path 部分，用于从 href 中剥离前缀
         String basePath = getBasePath();
 
-        // 当前请求目录的规范化路径（用于跳过"目录自身"这一条）
+        // 当前请求目录的规范化相对路径（用于剔除"目录自身"那一条）
+        String selfRel = normalizeRelPath(requestedPath);
+
         NodeList responses = doc.getElementsByTagNameNS("DAV:", "response");
 
         for (int i = 0; i < responses.getLength(); i++) {
@@ -365,11 +372,11 @@ public class WebDAVClient {
             // 2) URL 解码（处理中文、空格等）
             relPath = urlDecode(relPath);
 
-            // 3) 去掉首尾斜杠
+            // 3) 规范化：去首尾斜杠
             relPath = trimSlashes(relPath);
 
-            // 4) 跳过目录自身（相对路径为空）
-            if (relPath.isEmpty()) continue;
+            // 4) 剔除目录自身（与当前请求路径一致的那一条）
+            if (relPath.equals(selfRel)) continue;
 
             // 5) 跳过系统元数据文件
             if (isSystemFile(relPath)) continue;
@@ -430,6 +437,25 @@ public class WebDAVClient {
         }
 
         return files;
+    }
+
+    /**
+     * 把请求路径规范化为「相对 basePath 的路径」，用于与解析出的 relPath 比较。
+     * 例如 basePath="/dav/"，传入 "/cmcc/music" → 返回 "cmcc/music"；
+     * 传入 "/dav/cmcc" → 也返回 "cmcc"（容忍调用方误带 basePath 前缀）。
+     */
+    private String normalizeRelPath(String path) {
+        if (path == null) return "";
+        String p = urlDecode(path.trim());
+        p = trimSlashes(p);
+
+        // 若已带 basePath 前缀（如 "dav/cmcc"），剥掉它
+        String bp = trimSlashes(getBasePath());
+        if (!bp.isEmpty() && p.equals(bp)) return "";
+        if (!bp.isEmpty() && p.startsWith(bp + "/")) {
+            p = p.substring(bp.length() + 1);
+        }
+        return trimSlashes(p);
     }
 
     /** 取出 baseUrl 的 path 部分，如 https://host/dav/ -> "/dav/" */

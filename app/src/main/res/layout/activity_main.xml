@@ -138,12 +138,17 @@
                 android:ellipsize="end"
                 android:maxLines="1" />
             
-            <ProgressBar
+            <SeekBar
                 android:id="@+id/playerProgressBar"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                style="@style/Widget.DavMusic.PlayerProgressBar" />
+                android:maxHeight="3dp"
+                android:minHeight="3dp"
+                android:progressDrawable="@drawable/player_progress"
+                android:thumbTint="@color/player_progress_foreground"
+                android:paddingStart="0dp"
+                android:paddingEnd="0dp" />
             
         </LinearLayout>
         

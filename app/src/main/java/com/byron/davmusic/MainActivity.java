@@ -15,7 +15,7 @@ import android.view.MenuItem;
 import android.view.View;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
-import android.widget.ProgressBar;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -52,7 +52,7 @@ public class MainActivity extends AppCompatActivity implements
     private ImageButton playPauseButton;
     private ImageButton previousButton;
     private ImageButton nextButton;
-    private ProgressBar playerProgressBar;
+    private SeekBar playerProgressBar;
     
     private FileListAdapter fileListAdapter;
     private ExecutorService executorService;
@@ -66,6 +66,7 @@ public class MainActivity extends AppCompatActivity implements
     private List<String> pathStack = new ArrayList<>();
     private String currentPath = "/";
     private boolean isOfflineMode = false;
+    private boolean isSeeking = false;   // 用户正在拖动进度条时，暂停自动刷新
     
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -119,6 +120,26 @@ public class MainActivity extends AppCompatActivity implements
         previousButton = findViewById(R.id.previousButton);
         nextButton = findViewById(R.id.nextButton);
         playerProgressBar = findViewById(R.id.playerProgressBar);
+
+        // 进度条可拖动：用户按住/拖动时暂停自动刷新，松手后 seekTo。
+        // 若不做这个保护，播放进度每秒回调会把手柄"拽"回去，表现为拖不动。
+        playerProgressBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                // 拖动时不需要额外处理，松手才真正 seek
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+                isSeeking = true;
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+                musicPlayer.seekTo(seekBar.getProgress());
+                isSeeking = false;
+            }
+        });
         
         // 播放器按钮点击事件
         playPauseButton.setOnClickListener(v -> togglePlayPause());
@@ -548,7 +569,9 @@ public class MainActivity extends AppCompatActivity implements
         if (currentTrack != null) {
             playerTitleTextView.setText(currentTrack.getDisplayName());
             playerProgressBar.setMax(musicPlayer.getDuration());
-            playerProgressBar.setProgress(musicPlayer.getCurrentPosition());
+            if (!isSeeking) {
+                playerProgressBar.setProgress(musicPlayer.getCurrentPosition());
+            }
             
             if (musicPlayer.isPlaying()) {
                 playPauseButton.setImageResource(R.drawable.ic_pause);
@@ -591,7 +614,10 @@ public class MainActivity extends AppCompatActivity implements
     public void onProgress(int position, int duration) {
         mainHandler.post(() -> {
             playerProgressBar.setMax(duration);
-            playerProgressBar.setProgress(position);
+            // 用户正在拖动时不覆盖进度，否则手柄会被每秒回调拽回原位
+            if (!isSeeking) {
+                playerProgressBar.setProgress(position);
+            }
         });
     }
     
