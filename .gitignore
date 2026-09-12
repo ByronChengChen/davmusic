@@ -94,3 +94,8 @@ Thumbs.db
 # 否则 CI 环境无法运行 ./gradlew
 *.jar
 !gradle/wrapper/gradle-wrapper.jar
+
+# 签名密钥：keystore/davmusic.p12 是【固定的 debug 签名】，
+# 必须纳入版本控制 —— 否则每次 CI 构建签名不同，无法覆盖安装
+# （报错 Conflicting app signatures）。debug 签名无安全风险。
+!keystore/davmusic.p12

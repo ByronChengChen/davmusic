@@ -28,8 +28,22 @@ jobs:
     - name: Make gradlew executable
       run: chmod +x ./gradlew
 
+    # 用仓库内的固定 keystore 签名。
+    # 默认 debug keystore 由各 runner 临时生成，导致每次构建签名不同、
+    # 无法覆盖安装（Conflicting app signatures）。
+    # 固定签名后 adb install -r 可直接覆盖且保留数据。
+    - name: Configure fixed signing key
+      run: |
+        mkdir -p keystore
+        # .p12 已在仓库中（debug 用途，无安全风险）
+
     - name: Build debug APK
-      run: ./gradlew assembleDebug --no-daemon --stacktrace
+      run: |
+        ./gradlew assembleDebug --no-daemon --stacktrace \
+          -Pdavmusic.storeFile=keystore/davmusic.p12 \
+          -Pdavmusic.storePassword=davmusic2026 \
+          -Pdavmusic.keyAlias=davmusic \
+          -Pdavmusic.keyPassword=davmusic2026
 
     - name: List APK output
       run: find . -name "*.apk" -type f

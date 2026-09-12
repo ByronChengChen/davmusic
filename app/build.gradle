@@ -16,10 +16,34 @@ android {
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // 固定签名配置。
+    // 默认 debug keystore 由每个 CI runner 临时生成，各次构建签名不同，
+    // 会导致 "Conflicting app signatures" 无法覆盖安装。
+    // 这里改用仓库内固定的 keystore（debug 用途，无安全风险），
+    // 使每次构建签名一致，支持 adb install -r 覆盖安装并保留数据。
+    // 参数由 CI 通过 -P 传入；本地构建若未传入则回退到默认 debug 签名。
+    signingConfigs {
+        if (project.hasProperty('davmusic.storeFile')) {
+            fixed {
+                storeFile file(project.property('davmusic.storeFile'))
+                storePassword project.property('davmusic.storePassword')
+                keyAlias project.property('davmusic.keyAlias')
+                keyPassword project.property('davmusic.keyPassword')
+                // PKCS12 的 store/key 密码必须一致
+                storeType 'PKCS12'
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            if (project.hasProperty('davmusic.storeFile')) {
+                signingConfig signingConfigs.fixed
+            }
         }
     }
     compileOptions {
