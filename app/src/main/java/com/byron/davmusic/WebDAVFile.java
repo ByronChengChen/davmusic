@@ -96,9 +96,22 @@ public class WebDAVFile {
     }
 
     // 辅助方法
+    /**
+     * 是否为音频文件。
+     *
+     * 优先按扩展名判断（最可靠，不依赖服务器返回的 MIME），
+     * 扩展名无法判定时才参考 contentType。
+     */
     public boolean isAudio() {
-        if (contentType == null) return false;
-        return contentType.startsWith("audio/") || FileUtils.isAudioFile(displayName);
+        // 1) 扩展名优先 —— 服务器 MIME 可能不准（如 application/octet-stream）
+        if (FileUtils.isAudioFile(displayName)) {
+            return true;
+        }
+        // 2) 扩展名判断失败时，退回到 MIME 类型
+        if (contentType != null) {
+            return contentType.trim().toLowerCase().startsWith("audio/");
+        }
+        return false;
     }
 
     public boolean isImage() {

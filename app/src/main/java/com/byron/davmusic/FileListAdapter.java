@@ -12,6 +12,7 @@ import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public class FileListAdapter extends RecyclerView.Adapter<FileListAdapter.ViewHolder> {
@@ -33,9 +34,44 @@ public class FileListAdapter extends RecyclerView.Adapter<FileListAdapter.ViewHo
         this.files = new ArrayList<>();
     }
     
+    /**
+     * 设置文件列表。
+     *
+     * 只保留「文件夹」和「音频文件」，其余（图片、歌词、文档、系统文件等）一律不展示。
+     * 过滤在此处集中完成，保证后续的点击、播放列表、下载等逻辑看到的
+     * 都是可见项，避免下标错位。
+     */
     public void setFiles(List<WebDAVFile> files) {
-        this.files = files != null ? new ArrayList<>(files) : new ArrayList<>();
+        List<WebDAVFile> visible = new ArrayList<>();
+        if (files != null) {
+            for (WebDAVFile f : files) {
+                if (f == null) continue;
+                // 展示文件夹，以及音频文件；其余全部丢弃
+                if (f.isCollection() || f.isAudio()) {
+                    visible.add(f);
+                }
+            }
+        }
+        this.files = sortFiles(visible);
         notifyDataSetChanged();
+    }
+
+    /**
+     * 排序：文件夹在前，音频文件在后；同类按名称排序（区分大小写不敏感）。
+     */
+    private List<WebDAVFile> sortFiles(List<WebDAVFile> list) {
+        List<WebDAVFile> result = new ArrayList<>(list);
+        Collections.sort(result, (a, b) -> {
+            // 1) 文件夹优先
+            if (a.isCollection() != b.isCollection()) {
+                return a.isCollection() ? -1 : 1;
+            }
+            // 2) 同类型按名称
+            String na = a.getDisplayName() != null ? a.getDisplayName() : "";
+            String nb = b.getDisplayName() != null ? b.getDisplayName() : "";
+            return na.compareToIgnoreCase(nb);
+        });
+        return result;
     }
     
     public void setOfflineMode(boolean offlineMode) {
