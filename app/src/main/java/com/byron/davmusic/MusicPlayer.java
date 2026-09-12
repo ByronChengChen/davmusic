@@ -25,6 +25,7 @@ public class MusicPlayer {
     private int currentPosition = -1;
     private boolean isPreparing = false;
     private Map<String, String> authHeaders;
+    private String currentUrl;     // 当前播放的 URL，便于错误诊断
     
     private List<OnPlaybackListener> listeners = new ArrayList<>();
     
@@ -68,8 +69,9 @@ public class MusicPlayer {
         
         mediaPlayer.setOnErrorListener((mp, what, extra) -> {
             isPreparing = false;
-            String error = "MediaPlayer error: what=" + what + ", extra=" + extra;
-            Log.e(TAG, error);
+            String detail = describeMediaError(what, extra);
+            String error = "播放错误: " + detail;
+            Log.e(TAG, error + " | url=" + currentUrl);
             notifyError(error);
             return true;
         });
@@ -94,11 +96,30 @@ public class MusicPlayer {
         this.authHeaders = headers;
     }
     
+    /**
+     * 把 MediaPlayer 的 what/extra 错误码翻译成可读信息，
+     * 便于用户反馈与排查。
+     */
+    private String describeMediaError(int what, int extra) {
+        if (what == MediaPlayer.MEDIA_ERROR_UNKNOWN) {
+            return "未知错误(what=" + what + ", extra=" + extra + ")";
+        }
+        if (what == MediaPlayer.MEDIA_ERROR_SERVER_DIED) {
+            return "媒体服务已终止(extra=" + extra + ")";
+        }
+        if (what == -38) {
+            // 常见于数据源无效 / 格式不支持 / 网络请求失败
+            return "无法读取音频源(what=-38) — 可能是网络、地址或格式问题";
+        }
+        return "what=" + what + ", extra=" + extra;
+    }
+
     public void play(String url, String displayName) {
         if (url == null || url.isEmpty()) {
             notifyError("播放 URL 为空");
             return;
         }
+        currentUrl = url;
         
         stop();
         
@@ -162,12 +183,12 @@ public class MusicPlayer {
                 Log.d(TAG, "播放本地文件: " + localFile.getAbsolutePath());
             } else {
                 // 本地文件不存在，播放在线文件
-                url = WebDAVClient.getInstance().getDownloadUrl(file.getHref());
+                url = WebDAVClient.getInstance().getDownloadUrl(file);
                 Log.d(TAG, "本地文件不存在，播放在线文件: " + url);
             }
         } else {
             // 播放在线文件
-            url = WebDAVClient.getInstance().getDownloadUrl(file.getHref());
+            url = WebDAVClient.getInstance().getDownloadUrl(file);
             Log.d(TAG, "播放在线文件: " + url);
         }
         

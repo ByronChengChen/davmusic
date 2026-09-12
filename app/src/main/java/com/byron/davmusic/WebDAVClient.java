@@ -72,7 +72,9 @@ public class WebDAVClient {
             return;
         }
 
-        String url = baseUrl + (path.startsWith("/") ? path.substring(1) : path);
+        // 用 getDownloadUrl(path) 统一做 URL 编码与 basePath 去重，
+        // 否则含中文/空格的目录请求会失败（HTTP 000）
+        String url = getDownloadUrl(path);
         if (!url.endsWith("/")) {
             url += "/";
         }
@@ -127,6 +129,15 @@ public class WebDAVClient {
     }
 
     // 下载文件
+    public void download(WebDAVFile file, File destFile, final ProgressCallback callback) {
+        if (file == null) {
+            callback.onError(new Exception("file is null"));
+            return;
+        }
+        download(file.getRelativePath() != null ? file.getRelativePath() : file.getHref(),
+                destFile, callback);
+    }
+
     public void download(String remotePath, File destFile, final ProgressCallback callback) {
         if (!isConfigured()) {
             callback.onError(new Exception("WebDAV client not configured"));
@@ -224,8 +235,65 @@ public class WebDAVClient {
     }
 
     // 获取下载 URL
+    /**
+     * 由 WebDAVFile 构造可直接访问的完整 URL。
+     *
+     * 用 relativePath（已剥离 baseUrl 前缀、已 URL 解码）作为路径源，
+     * 再对每段重新做 URL 编码 —— 否则中文与空格会导致请求发不出去
+     * （实测未编码时 curl 返回 HTTP 000，编码后正常 302）。
+     */
+    public String getDownloadUrl(WebDAVFile file) {
+        String rel = (file != null) ? file.getRelativePath() : null;
+        if (rel == null || rel.isEmpty()) {
+            // 兜底：从 href 中剥离 basePath
+            String href = (file != null) ? file.getHref() : null;
+            if (href == null) return baseUrl;
+            rel = trimSlashes(stripBasePath(href, getBasePath()));
+            rel = urlDecode(rel);
+        }
+        return getDownloadUrl(rel);
+    }
+
+    /**
+     * 由相对路径构造完整 URL。
+     * 兼容传入以 "/" 开头、或误带 basePath 前缀（如 "dav/cmcc/..."）的路径。
+     */
     public String getDownloadUrl(String remotePath) {
-        return baseUrl + (remotePath.startsWith("/") ? remotePath.substring(1) : remotePath);
+        String path = remotePath == null ? "" : remotePath;
+
+        // 去掉首斜杠
+        while (path.startsWith("/")) path = path.substring(1);
+
+        // 去掉可能误带的 basePath 前缀（防止出现 /dav/dav/... 这样的重复）
+        String basePath = getBasePath();
+        String bp = trimSlashes(basePath);
+        if (!bp.isEmpty() && path.startsWith(bp + "/")) {
+            path = path.substring(bp.length() + 1);
+        }
+
+        // 逐段 URL 编码（保留 "/" 作为分隔符）
+        StringBuilder sb = new StringBuilder(baseUrl);
+        String[] segments = path.split("/", -1);
+        for (int i = 0; i < segments.length; i++) {
+            if (i > 0) sb.append('/');
+            sb.append(encodeSegment(segments[i]));
+        }
+        return sb.toString();
+    }
+
+    /** 对单个路径段做 URL 编码；保留已有的 %XX（避免二次编码） */
+    private String encodeSegment(String seg) {
+        if (seg == null || seg.isEmpty()) return "";
+        try {
+            // 若该段本身已含 %XX 形态，认为已编码，直接返回
+            if (seg.matches(".*%[0-9A-Fa-f]{2}.*")) {
+                return seg;
+            }
+            return java.net.URLEncoder.encode(seg, "UTF-8")
+                    .replace("+", "%20");   // URLEncoder 把空格编成 +，路径中应为 %20
+        } catch (Exception e) {
+            return seg;
+        }
     }
 
     // 测试连接

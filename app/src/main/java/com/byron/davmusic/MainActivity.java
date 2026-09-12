@@ -416,7 +416,7 @@ public class MainActivity extends AppCompatActivity implements
         showLoading("正在下载: " + file.getDisplayName());
         
         executorService.execute(() -> {
-            webDAVClient.download(file.getHref(), destFile, new WebDAVClient.ProgressCallback() {
+            webDAVClient.download(file, destFile, new WebDAVClient.ProgressCallback() {
                 @Override
                 public void onProgress(int progress) {
                     // 可以在这里更新进度条
