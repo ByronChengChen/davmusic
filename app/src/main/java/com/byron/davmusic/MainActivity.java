@@ -4,7 +4,6 @@ import android.app.AlertDialog;
 import android.app.ProgressDialog;
 import android.content.DialogInterface;
 import android.content.Intent;
-import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -23,7 +22,6 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
-import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -43,12 +41,6 @@ public class MainActivity extends AppCompatActivity implements
         SwipeRefreshLayout.OnRefreshListener {
     
     private static final String TAG = "MainActivity";
-    private static final int PERMISSION_REQUEST_CODE = 1001;
-    private static final String[] REQUIRED_PERMISSIONS = new String[] {
-            android.Manifest.permission.INTERNET,
-            android.Manifest.permission.ACCESS_NETWORK_STATE,
-            android.Manifest.permission.READ_EXTERNAL_STORAGE
-    };
     
     private Toolbar toolbar;
     private TextView pathTextView;
@@ -79,20 +71,16 @@ public class MainActivity extends AppCompatActivity implements
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        
-        // 检查权限
-        if (!checkPermissions()) {
-            requestPermissions();
-            return;
-        }
-        
+
+        // 无需运行时权限：下载写入的是 App 私有目录（getExternalFilesDir），
+        // 上传通过系统文件选择器（SAF）由系统代读，均不需要存储权限。
         initViews();
         initManagers();
         initPlayer();
-        
+
         executorService = Executors.newSingleThreadExecutor();
         mainHandler = new Handler(Looper.getMainLooper());
-        
+
         // 加载当前路径
         loadCurrentPath();
     }
@@ -150,11 +138,19 @@ public class MainActivity extends AppCompatActivity implements
     }
     
     private void initManagers() {
-        // 获取 WebDAV 配置
+        // 获取 WebDAV 配置（未配置时返回空字符串，不会 NPE）
         String serverUrl = ServerConfigActivity.getServerUrl(this);
         String username = ServerConfigActivity.getUsername(this);
         String password = ServerConfigActivity.getPassword(this);
-        
+
+        // 保险：配置缺失时引导回配置页，避免后续请求静默失败
+        if (serverUrl == null || serverUrl.trim().isEmpty()) {
+            Toast.makeText(this, "请先配置 WebDAV 服务器", Toast.LENGTH_LONG).show();
+            startActivity(new Intent(this, ServerConfigActivity.class));
+            finish();
+            return;
+        }
+
         // 配置 WebDAV 客户端
         webDAVClient = WebDAVClient.getInstance();
         webDAVClient.configure(serverUrl, username, password);
@@ -600,43 +596,6 @@ public class MainActivity extends AppCompatActivity implements
         mainHandler.post(() -> {
             Toast.makeText(this, "播放错误: " + error, Toast.LENGTH_LONG).show();
         });
-    }
-    
-    // 权限相关
-    private boolean checkPermissions() {
-        for (String permission : REQUIRED_PERMISSIONS) {
-            if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
-                return false;
-            }
-        }
-        return true;
-    }
-    
-    private void requestPermissions() {
-        ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, PERMISSION_REQUEST_CODE);
-    }
-    
-    @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        
-        if (requestCode == PERMISSION_REQUEST_CODE) {
-            boolean allGranted = true;
-            for (int grantResult : grantResults) {
-                if (grantResult != PackageManager.PERMISSION_GRANTED) {
-                    allGranted = false;
-                    break;
-                }
-            }
-            
-            if (allGranted) {
-                // 权限已授予，重新初始化
-                recreate();
-            } else {
-                Toast.makeText(this, "需要权限才能使用应用", Toast.LENGTH_LONG).show();
-                finish();
-            }
-        }
     }
     
     // 菜单
