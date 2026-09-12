@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:padding="12dp"
+    android:background="?attr/selectableItemBackground"
+    android:minHeight="64dp">
+    
+    <!-- 图标 -->
+    <ImageView
+        android:id="@+id/iconImageView"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:layout_marginEnd="16dp"
+        android:layout_gravity="center_vertical"
+        android:scaleType="centerInside"
+        android:tint="@color/icon_normal" />
+    
+    <!-- 文件信息 -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_gravity="center_vertical"
+        android:orientation="vertical">
+        
+        <!-- 文件名 -->
+        <TextView
+            android:id="@+id/fileNameTextView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="文件名"
+            android:textSize="16sp"
+            android:textColor="@color/text_primary"
+            android:ellipsize="end"
+            android:maxLines="1" />
+        
+        <!-- 文件大小和时长 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:orientation="horizontal">
+            
+            <TextView
+                android:id="@+id/fileSizeTextView"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0 B"
+                android:textSize="12sp"
+                android:textColor="@color/text_secondary"
+                android:layout_marginEnd="12dp" />
+            
+            <TextView
+                android:id="@+id/fileDurationTextView"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="--:--"
+                android:textSize="12sp"
+                android:textColor="@color/text_secondary" />
+            
+        </LinearLayout>
+        
+    </LinearLayout>
+    
+    <!-- 操作按钮区域 -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="match_parent"
+        android:orientation="horizontal"
+        android:gravity="center">
+        
+        <!-- 进度条（下载中显示） -->
+        <ProgressBar
+            android:id="@+id/progressBar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:visibility="gone" />
+        
+        <!-- 下载按钮（未下载显示） -->
+        <ImageView
+            android:id="@+id/downloadButton"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_marginEnd="8dp"
+            android:src="@drawable/ic_download"
+            android:contentDescription="@string/btn_download"
+            android:tint="@color/icon_normal"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:visibility="gone" />
+        
+        <!-- 删除按钮（已下载显示） -->
+        <ImageView
+            android:id="@+id/deleteButton"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_marginEnd="8dp"
+            android:src="@drawable/ic_delete"
+            android:contentDescription="@string/btn_delete"
+            android:tint="@color/icon_normal"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:visibility="gone" />
+        
+    </LinearLayout>
+    
+</LinearLayout>

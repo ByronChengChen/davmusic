@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DavMusic</string>
+    
+    <!-- 服务器配置界面 -->
+    <string name="title_server_config">服务器配置</string>
+    <string name="hint_server_url">WebDAV 服务器地址</string>
+    <string name="hint_username">用户名</string>
+    <string name="hint_password">密码</string>
+    <string name="btn_test_connection">测试连接</string>
+    <string name="btn_save_config">保存配置</string>
+    <string name="msg_connection_success">连接成功</string>
+    <string name="msg_connection_failed">连接失败，请检查配置</string>
+    <string name="msg_config_saved">配置保存成功</string>
+    
+    <!-- 错误消息 -->
+    <string name="error_server_url_required">请输入服务器地址</string>
+    <string name="error_username_required">请输入用户名</string>
+    <string name="error_password_required">请输入密码</string>
+    <string name="error_invalid_url">请输入完整的 URL (以 http:// 或 https:// 开头)</string>
+    <string name="error_network_unavailable">网络不可用</string>
+    <string name="error_webdav_not_configured">WebDAV 客户端未配置</string>
+    
+    <!-- 主界面 -->
+    <string name="title_folder_browser">文件浏览</string>
+    <string name="label_current_path">当前路径</string>
+    <string name="label_network_status">网络状态</string>
+    <string name="network_online">在线</string>
+    <string name="network_offline">离线</string>
+    <string name="btn_back">返回</string>
+    <string name="btn_upload">上传</string>
+    <string name="menu_settings">设置</string>
+    <string name="menu_refresh">刷新</string>
+    <string name="menu_clear_cache">清空缓存</string>
+    <string name="menu_about">关于</string>
+    
+    <!-- 文件操作 -->
+    <string name="title_file_details">文件详细信息</string>
+    <string name="label_file_name">文件名</string>
+    <string name="label_file_size">大小</string>
+    <string name="label_file_type">类型</string>
+    <string name="label_download_status">下载状态</string>
+    <string name="label_file_path">路径</string>
+    <string name="btn_download">下载</string>
+    <string name="btn_delete">删除</string>
+    <string name="btn_play">播放</string>
+    <string name="btn_pause">暂停</string>
+    <string name="btn_previous">上一首</string>
+    <string name="btn_next">下一首</string>
+    
+    <!-- 对话框 -->
+    <string name="title_confirm_delete">删除确认</string>
+    <string name="msg_confirm_delete_file">确定要删除本地文件吗？</string>
+    <string name="title_clear_cache">清空缓存</string>
+    <string name="msg_confirm_clear_cache">确定要清空所有缓存数据吗？</string>
+    <string name="title_about">关于 DavMusic</string>
+    <string name="msg_about_content">DavMusic v1.0\nWebDAV 音乐播放器</string>
+    
+    <!-- 状态消息 -->
+    <string name="msg_loading">正在加载…</string>
+    <string name="msg_downloading">正在下载: %s</string>
+    <string name="msg_download_complete">下载完成: %s</string>
+    <string name="msg_download_failed">下载失败: %s</string>
+    <string name="msg_delete_complete">已删除本地文件: %s</string>
+    <string name="msg_cache_cleared">缓存已清空</string>
+    <string name="msg_offline_mode">离线模式</string>
+    <string name="msg_no_offline_data">没有离线数据可用</string>
+    
+    <!-- 播放器 -->
+    <string name="label_no_track">未播放</string>
+    <string name="label_playback_error">播放错误: %s</string>
+    <string name="msg_playback_started">开始播放: %s</string>
+    <string name="msg_playback_paused">播放已暂停</string>
+    <string name="msg_playback_resumed">播放已继续</string>
+    
+    <!-- 权限相关 -->
+    <string name="msg_permission_required">需要权限才能使用应用</string>
+    
+    <!-- 文件类型 -->
+    <string name="file_type_folder">文件夹</string>
+    <string name="file_type_audio">音频文件</string>
+    <string name="file_type_image">图片文件</string>
+    <string name="file_type_lyrics">歌词文件</string>
+    <string name="file_type_other">其他文件</string>
+    
+    <!-- 下载状态 -->
+    <string name="download_state_not_downloaded">未下载</string>
+    <string name="download_state_downloading">下载中</string>
+    <string name="download_state_downloaded">已下载</string>
+</resources>
