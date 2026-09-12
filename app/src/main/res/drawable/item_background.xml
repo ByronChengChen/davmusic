@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  列表项背景：单击水波纹 + 正在播放高亮。
+
+  说明：原先使用 ?attr/selectableItemBackground 作为 background，
+  但代码需要通过 setBackgroundResource() 切换"正在播放"底色，
+  两者会互相覆盖。这里改为自定义 ripple drawable：
+    - 内容层使用 item_bg_selector（按 android:state_activated 切换底色）
+    - 水波纹叠在其上，保留点击反馈
+  适配器通过 itemView.setActivated(true) 来点亮高亮，无需换 background。
+-->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="#33000000">
+    <item android:drawable="@drawable/item_bg_selector" />
+</ripple>

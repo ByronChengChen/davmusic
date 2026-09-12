@@ -75,6 +75,16 @@ public class MusicPlayer {
             notifyError(error);
             return true;
         });
+
+        mediaPlayer.setOnInfoListener((mp, what, extra) -> {
+            // 记录流媒体缓冲区信息，便于诊断弱网卡顿
+            if (what == MediaPlayer.MEDIA_INFO_BUFFERING_START) {
+                Log.d(TAG, "缓冲开始");
+            } else if (what == MediaPlayer.MEDIA_INFO_BUFFERING_END) {
+                Log.d(TAG, "缓冲结束");
+            }
+            return false;
+        });
         
         // 设置进度更新定时器
         handler.postDelayed(progressUpdater, 1000);
@@ -101,17 +111,36 @@ public class MusicPlayer {
      * 便于用户反馈与排查。
      */
     private String describeMediaError(int what, int extra) {
-        if (what == MediaPlayer.MEDIA_ERROR_UNKNOWN) {
-            return "未知错误(what=" + what + ", extra=" + extra + ")";
-        }
-        if (what == MediaPlayer.MEDIA_ERROR_SERVER_DIED) {
-            return "媒体服务已终止(extra=" + extra + ")";
-        }
+        String ext = getFileExtension(currentUrl);
+
         if (what == -38) {
             // 常见于数据源无效 / 格式不支持 / 网络请求失败
             return "无法读取音频源(what=-38) — 可能是网络、地址或格式问题";
         }
+        if (what == MediaPlayer.MEDIA_ERROR_UNKNOWN) {
+            // Android 原生 MediaPlayer 对 wma/ape 等格式支持不完整，
+            // 编解码器缺失时即报 what=1
+            if ("wma".equals(ext) || "ape".equals(ext)) {
+                return "系统播放器不支持 ." + ext + " 格式 — 建议先下载后用第三方播放器打开";
+            }
+            return "未知错误(what=1, extra=" + extra + ")"
+                    + (ext.isEmpty() ? "" : " — ." + ext + " 格式可能不被系统支持");
+        }
+        if (what == MediaPlayer.MEDIA_ERROR_SERVER_DIED) {
+            return "媒体服务已终止(extra=" + extra + ")";
+        }
         return "what=" + what + ", extra=" + extra;
+    }
+
+    /** 从 URL 中取出扩展名（小写，不含点） */
+    private String getFileExtension(String url) {
+        if (url == null) return "";
+        String u = url;
+        int q = u.indexOf('?');
+        if (q >= 0) u = u.substring(0, q);
+        int dot = u.lastIndexOf('.');
+        if (dot < 0 || dot == u.length() - 1) return "";
+        return u.substring(dot + 1).toLowerCase();
     }
 
     public void play(String url, String displayName) {
@@ -206,24 +235,77 @@ public class MusicPlayer {
         }
     }
     
+    /**
+     * 暂停。
+     *
+     * 只在真正处于播放状态时才 pause —— 缓冲中（Preparing）调用 pause()
+     * 会抛 IllegalStateException。
+     */
     public void pause() {
-        if (mediaPlayer != null && mediaPlayer.isPlaying()) {
-            mediaPlayer.pause();
-            notifyPlayStateChanged(false);
+        if (mediaPlayer == null) return;
+        if (isPreparing) {
+            // 缓冲阶段没有可暂停的内容，忽略
+            Log.d(TAG, "pause() 忽略：当前正在缓冲");
+            return;
+        }
+        try {
+            if (mediaPlayer.isPlaying()) {
+                mediaPlayer.pause();
+                notifyPlayStateChanged(false);
+            }
+        } catch (IllegalStateException e) {
+            Log.w(TAG, "pause() 状态非法，已忽略: " + e.getMessage());
         }
     }
-    
+
+    /**
+     * 恢复播放。
+     *
+     * 缓冲中或未准备时调用 start() 会抛 IllegalStateException
+     * （user 表现为播放按钮点击后报 what=-38），因此必须先判断状态。
+     */
     public void resume() {
-        if (mediaPlayer != null && !mediaPlayer.isPlaying()) {
-            mediaPlayer.start();
-            notifyPlayStateChanged(true);
+        if (mediaPlayer == null) return;
+        if (isPreparing) {
+            Log.d(TAG, "resume() 忽略：当前正在缓冲，准备完成后会自动播放");
+            return;
+        }
+        try {
+            if (!mediaPlayer.isPlaying()) {
+                mediaPlayer.start();
+                notifyPlayStateChanged(true);
+            }
+        } catch (IllegalStateException e) {
+            Log.w(TAG, "resume() 状态非法，已忽略: " + e.getMessage());
         }
     }
-    
+
+    /** 切换播放/暂停。缓冲期间忽略，避免 IllegalStateException */
+    public void togglePlayPause() {
+        if (mediaPlayer == null) return;
+        if (isPreparing) {
+            Log.d(TAG, "togglePlayPause() 忽略：当前正在缓冲");
+            return;
+        }
+        if (isPlaying()) {
+            pause();
+        } else {
+            resume();
+        }
+    }
+
     public void stop() {
         if (mediaPlayer != null) {
-            mediaPlayer.stop();
-            mediaPlayer.reset();
+            try {
+                mediaPlayer.stop();
+            } catch (IllegalStateException e) {
+                Log.w(TAG, "stop() 状态非法，已忽略: " + e.getMessage());
+            }
+            try {
+                mediaPlayer.reset();
+            } catch (IllegalStateException e) {
+                Log.w(TAG, "reset() 状态非法，已忽略: " + e.getMessage());
+            }
             initMediaPlayer(); // 重新初始化 MediaPlayer
             notifyPlayStateChanged(false);
         }

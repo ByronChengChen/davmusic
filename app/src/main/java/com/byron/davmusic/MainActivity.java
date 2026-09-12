@@ -548,11 +548,9 @@ public class MainActivity extends AppCompatActivity implements
     }
     
     private void togglePlayPause() {
-        if (musicPlayer.isPlaying()) {
-            musicPlayer.pause();
-        } else {
-            musicPlayer.resume();
-        }
+        // 委托给 MusicPlayer：它内部会判断缓冲状态，
+        // 缓冲期间忽略点击，避免 MediaPlayer 抛 IllegalStateException（what=-38）
+        musicPlayer.togglePlayPause();
     }
     
     private void playPrevious() {
@@ -596,6 +594,10 @@ public class MainActivity extends AppCompatActivity implements
     public void onTrackChanged(WebDAVFile track) {
         mainHandler.post(() -> {
             playerTitleTextView.setText(track.getDisplayName());
+            // 高亮列表中正在播放的条目
+            if (fileListAdapter != null && track != null) {
+                fileListAdapter.setPlayingHref(track.getHref());
+            }
         });
     }
     

@@ -32,6 +32,10 @@
     <color name="download_state_downloaded">#4CAF50</color>
     <color name="download_state_downloading">#2196F3</color>
     <color name="download_state_not_downloaded">#757575</color>
+
+    <!-- 正在播放条目高亮 -->
+    <color name="item_playing_background">#E3F2FD</color>
+    <color name="item_playing_text">#1976D2</color>
     
     <!-- 网络状态颜色 -->
     <color name="network_online">#4CAF50</color>

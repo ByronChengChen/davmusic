@@ -28,6 +28,9 @@ public class FileListAdapter extends RecyclerView.Adapter<FileListAdapter.ViewHo
     private List<WebDAVFile> files;
     private OnItemClickListener listener;
     private boolean isOfflineMode;
+
+    /** 正在播放的曲目 href，用于高亮对应列表项；null 表示没有在播放 */
+    private String playingHref;
     
     public FileListAdapter(Context context) {
         this.context = context;
@@ -78,6 +81,24 @@ public class FileListAdapter extends RecyclerView.Adapter<FileListAdapter.ViewHo
         this.isOfflineMode = offlineMode;
         notifyDataSetChanged();
     }
+
+    /**
+     * 设置/清除正在播放的曲目，触列表高亮刷新。
+     *
+     * @param href 正在播放曲目的 href；传 null 表示停止高亮
+     */
+    public void setPlayingHref(String href) {
+        if (href == null ? playingHref == null : href.equals(playingHref)) {
+            return;   // 无变化，避免无谓刷新
+        }
+        this.playingHref = href;
+        notifyDataSetChanged();
+    }
+
+    /** 当前高亮的曲目 href */
+    public String getPlayingHref() {
+        return playingHref;
+    }
     
     public void setOnItemClickListener(OnItemClickListener listener) {
         this.listener = listener;
@@ -114,7 +135,14 @@ public class FileListAdapter extends RecyclerView.Adapter<FileListAdapter.ViewHo
     @Override
     public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
         WebDAVFile file = files.get(position);
-        
+
+        // 是否正在播放本条目
+        boolean isPlaying = playingHref != null
+                && file.getHref() != null
+                && playingHref.equals(file.getHref());
+        // 用 activated 状态驱动背景选择器（保留水波纹点击反馈）
+        holder.itemView.setActivated(isPlaying);
+
         if (file.isCollection()) {
             // 文件夹项
             holder.iconImageView.setImageResource(R.drawable.ic_folder);
@@ -156,24 +184,38 @@ public class FileListAdapter extends RecyclerView.Adapter<FileListAdapter.ViewHo
             holder.fileSizeTextView.setText(FileUtils.formatFileSize(file.getContentLength()));
             holder.fileDurationTextView.setText(""); // 时长可以从元数据中获取，这里暂时留空
             
-            // 根据下载状态设置颜色和按钮
+            // 正在播放的条目：文字用高亮色，优先于下载状态色
+            int nameColor;
+            if (isPlaying) {
+                nameColor = context.getResources().getColor(R.color.item_playing_text);
+            } else {
+                switch (file.getDownloadState()) {
+                    case DOWNLOADED:
+                    case DOWNLOADING:
+                        nameColor = context.getResources().getColor(R.color.download_state_downloaded);
+                        break;
+                    default:
+                        nameColor = context.getResources().getColor(android.R.color.black);
+                        break;
+                }
+            }
+            holder.fileNameTextView.setTextColor(nameColor);
+
+            // 根据下载状态控制按钮/进度条显示
             switch (file.getDownloadState()) {
                 case NOT_DOWNLOADED:
-                    holder.fileNameTextView.setTextColor(context.getResources().getColor(android.R.color.black));
                     holder.downloadButton.setVisibility(View.VISIBLE);
                     holder.deleteButton.setVisibility(View.GONE);
                     holder.progressBar.setVisibility(View.GONE);
                     break;
                     
                 case DOWNLOADING:
-                    holder.fileNameTextView.setTextColor(context.getResources().getColor(R.color.download_state_downloaded));
                     holder.downloadButton.setVisibility(View.GONE);
                     holder.deleteButton.setVisibility(View.GONE);
                     holder.progressBar.setVisibility(View.VISIBLE);
                     break;
                     
                 case DOWNLOADED:
-                    holder.fileNameTextView.setTextColor(context.getResources().getColor(R.color.download_state_downloaded));
                     holder.downloadButton.setVisibility(View.GONE);
                     holder.deleteButton.setVisibility(View.VISIBLE);
                     holder.progressBar.setVisibility(View.GONE);

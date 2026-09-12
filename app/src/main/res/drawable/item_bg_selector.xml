@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 列表项底色：激活（正在播放）时为淡蓝，否则透明 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_activated="true"
+        android:drawable="@color/item_playing_background" />
+    <item android:drawable="@android:color/transparent" />
+</selector>
