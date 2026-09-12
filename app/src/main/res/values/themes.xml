@@ -99,7 +99,7 @@
     </style>
     
     <!-- 播放器进度条样式 -->
-    <style name="Widget.DavMusic.PlayerProgressBar">
+    <style name="Widget.DavMusic.PlayerProgressBar" parent="Widget.AppCompat.ProgressBar.Horizontal">
         <item name="android:progressDrawable">@drawable/player_progress</item>
         <item name="android:minHeight">3dp</item>
         <item name="android:maxHeight">3dp</item>
