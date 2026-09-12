@@ -32,8 +32,8 @@
         <item name="toolbarStyle">@style/Widget.DavMusic.Toolbar</item>
         
         <!-- 编辑框样式：必须是 EditText 系样式；TextInputLayout 的样式
-             由布局里的 style="@style/..." 单独指定。此处若误用
-             TextInputLayout 样式，其 box* 专有属性会导致 inflate 崩溃 -->
+             由布局单独指定。此处若误用 TextInputLayout 样式，其 box*
+             专有属性会导致 inflate 崩溃 -->
         <item name="editTextStyle">@style/Widget.DavMusic.TextInputEditText</item>
         
         <!-- 列表项样式 -->
@@ -44,9 +44,15 @@
     </style>
     
     <!-- 无 ActionBar 主题 -->
-    <style name="Theme.DavMusic.NoActionBar">
+    <!-- 无 ActionBar 主题：供使用 Toolbar 的 Activity 使用。
+         继承 Theme.DavMusic 以保留配色，并显式关闭 ActionBar 相关的三个属性。
+         若遗漏任何一个，setSupportActionBar() 会抛 IllegalStateException -->
+    <style name="Theme.DavMusic.NoActionBar" parent="Theme.DavMusic">
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="windowActionModeOverlay">true</item>
     </style>
     
     <!-- 对话框主题 -->

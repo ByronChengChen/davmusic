@@ -32,10 +32,12 @@
             </intent-filter>
         </activity>
         
-        <!-- 主界面 -->
+        <!-- 主界面：使用 NoActionBar 主题，因为它用 Toolbar 替代 ActionBar。
+             主题若带 ActionBar，setSupportActionBar() 会抛 IllegalStateException -->
         <activity
             android:name="com.byron.davmusic.MainActivity"
             android:exported="true"
+            android:theme="@style/Theme.DavMusic.NoActionBar"
             android:screenOrientation="portrait" />
         
         <!-- 文件提供者（用于文件共享） -->
