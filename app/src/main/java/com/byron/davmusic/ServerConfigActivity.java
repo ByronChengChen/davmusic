@@ -37,18 +37,20 @@ public class ServerConfigActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_server_config);
-        
+
+        // 注意：executorService 必须在任何提前 return 之前初始化，
+        // 否则后续 testConnection() 使用它时会 NPE
+        executorService = Executors.newSingleThreadExecutor();
+
         // 检查是否已配置，如果已配置则直接跳转到主界面
         if (isConfigured()) {
             startMainActivity();
             finish();
             return;
         }
-        
+
         initViews();
         loadSavedConfig();
-        
-        executorService = Executors.newSingleThreadExecutor();
     }
     
     private void initViews() {

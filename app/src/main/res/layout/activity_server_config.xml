@@ -24,7 +24,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginBottom="16dp"
-        style="@style/Widget.DavMusic.EditText"
+        style="@style/Widget.DavMusic.TextInputLayout"
         >
         
         <com.google.android.material.textfield.TextInputEditText
@@ -43,7 +43,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginBottom="16dp"
-        style="@style/Widget.DavMusic.EditText"
+        style="@style/Widget.DavMusic.TextInputLayout"
         >
         
         <com.google.android.material.textfield.TextInputEditText
@@ -62,7 +62,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginBottom="32dp"
-        style="@style/Widget.DavMusic.EditText"
+        style="@style/Widget.DavMusic.TextInputLayout"
         app:endIconMode="password_toggle">
         
         <com.google.android.material.textfield.TextInputEditText
