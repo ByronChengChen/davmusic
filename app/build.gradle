@@ -25,7 +25,9 @@ android {
     signingConfigs {
         if (project.hasProperty('davmusic.storeFile')) {
             fixed {
-                storeFile file(project.property('davmusic.storeFile'))
+                // 注意：app 模块中的 file() 以 app/ 为基准解析，
+                // 而 keystore 位于仓库根目录，必须用 rootProject.file()
+                storeFile rootProject.file(project.property('davmusic.storeFile'))
                 storePassword project.property('davmusic.storePassword')
                 keyAlias project.property('davmusic.keyAlias')
                 keyPassword project.property('davmusic.keyPassword')
