@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">DavMusic</string>
+    <string name="time_zero">00:00</string>
     
     <!-- 服务器配置界面 -->
     <string name="title_server_config">服务器配置</string>

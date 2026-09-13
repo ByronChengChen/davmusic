@@ -44,6 +44,18 @@ public class MusicPlayer {
     private boolean hasAudioFocus = false;
     /** 预加载的下一首 MediaPlayer（由 setNextMediaPlayer 接管，需跟踪以避免泄漏） */
     private android.media.MediaPlayer preloadedPlayer;
+
+    /**
+     * 主动中断标记。
+     *
+     * 背景：stop()/切歌会强制中断正在播放的数据流，MediaPlayer 必然回调
+     * onError(what=-38, MEDIA_ERROR_UNKNOWN)。这属于【预期内的中断】，
+     * 不是真故障 —— 但若照常上报，用户每次切歌都会看到两条错误提示
+     * （一条来自当前实例，一条来自被释放的预加载实例）。
+     *
+     * 用这个标记区分"我方主动中断"与"真实播放失败"。
+     */
+    private volatile boolean intentionalStop = false;
     
     private List<OnPlaybackListener> listeners = new ArrayList<>();
     /** 远程日志：只记录，不影响播放逻辑 */
@@ -285,6 +297,18 @@ public class MusicPlayer {
         
         mpCur.setOnErrorListener((mp, what, extra) -> {
             isPreparing = false;
+
+            // 区分"主动中断"与"真实失败"。
+            //
+            // stop()/切歌会强制中断数据流，MediaPlayer 必然回报
+            // what=-38（MEDIA_ERROR_UNKNOWN）。以正常播放为前提，
+            // 这种中断不应打扰用户 —— 只有非主动中断时才上报。
+            if (intentionalStop) {
+                Log.d(TAG, "忽略主动中断产生的 onError: what=" + what
+                        + " extra=" + extra);
+                return true;
+            }
+
             String detail = describeMediaError(what, extra);
             String error = "播放错误: " + detail;
             Log.e(TAG, error + " | url=" + currentUrl);
@@ -523,8 +547,10 @@ public class MusicPlayer {
             });
 
             next.setOnErrorListener((mp, what, extra) -> {
-                rlog.w(TAG, "预加载播放器出错: what=" + what + " extra=" + extra
-                        + " (" + nextName + ")");
+                // 预加载实例在切歌时会被主动 release，必然回报错误；
+                // 这里只记调试日志，不上报 UI（用户不该看到预加载失败）
+                Log.d(TAG, "预加载播放器 onError（多为主动释放所致）: what="
+                        + what + " extra=" + extra + " (" + nextName + ")");
                 return true;
             });
 
@@ -753,6 +779,8 @@ public class MusicPlayer {
 
     public void stop() {
         if (mediaPlayer != null) {
+            // 标记主动中断：期间产生的 onError 属于预期行为，不上报
+            intentionalStop = true;
             try {
                 mediaPlayer.stop();
             } catch (IllegalStateException e) {
@@ -772,6 +800,10 @@ public class MusicPlayer {
         // setNextMediaPlayer 的接收方由当前 mediaPlayer 持有，
         // reset() 后不再引用，必须手动 release。
         releasePreloadedPlayer();
+
+        // 中断动作已完成，恢复正常错误上报。
+        // 延迟一点再清除：release/stop 触发的 onError 可能在稍后派发。
+        handler.postDelayed(() -> intentionalStop = false, 300);
     }
 
     /** 释放预加载实例（幂等） */

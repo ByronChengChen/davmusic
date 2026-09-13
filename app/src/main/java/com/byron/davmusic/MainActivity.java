@@ -53,6 +53,9 @@ public class MainActivity extends AppCompatActivity implements
     private ImageButton previousButton;
     private ImageButton nextButton;
     private SeekBar playerProgressBar;
+    /** 播放时间文本：当前进度 / 总时长 */
+    private TextView playerCurrentTimeText;
+    private TextView playerTotalTimeText;
     
     private FileListAdapter fileListAdapter;
     private ExecutorService executorService;
@@ -255,6 +258,8 @@ public class MainActivity extends AppCompatActivity implements
         previousButton = findViewById(R.id.previousButton);
         nextButton = findViewById(R.id.nextButton);
         playerProgressBar = findViewById(R.id.playerProgressBar);
+        playerCurrentTimeText = findViewById(R.id.playerCurrentTimeText);
+        playerTotalTimeText = findViewById(R.id.playerTotalTimeText);
 
         // 进度条可拖动：用户按住/拖动时暂停自动刷新，松手后 seekTo。
         // 若不做这个保护，播放进度每秒回调会把手柄"拽"回去，表现为拖不动。
@@ -283,7 +288,7 @@ public class MainActivity extends AppCompatActivity implements
         
         miniPlayerLayout.setOnClickListener(v -> {
             // 可以在这里实现点击播放器展开详细播放界面的功能
-            Toast.makeText(this, "点击了播放器", Toast.LENGTH_SHORT).show();
+            toast("点击了播放器", Toast.LENGTH_SHORT);
         });
         
         // 上传按钮
@@ -301,7 +306,7 @@ public class MainActivity extends AppCompatActivity implements
 
         // 保险：配置缺失时引导回配置页，避免后续请求静默失败
         if (serverUrl == null || serverUrl.trim().isEmpty()) {
-            Toast.makeText(this, "请先配置 WebDAV 服务器", Toast.LENGTH_LONG).show();
+            toast("请先配置 WebDAV 服务器", Toast.LENGTH_LONG);
             startActivity(new Intent(this, ServerConfigActivity.class));
             finish();
             return;
@@ -504,17 +509,14 @@ public class MainActivity extends AppCompatActivity implements
 
                 if (result.isEmpty()) {
                     fileListAdapter.setFiles(new ArrayList<>());
-                    Toast.makeText(this,
-                            "该目录无离线数据\n（联网浏览过的目录会自动缓存列表）",
-                            Toast.LENGTH_LONG).show();
+                    toast("该目录无离线数据\n（联网浏览过的目录会自动缓存列表）",
+                            Toast.LENGTH_LONG);
                 } else {
                     fileListAdapter.setFiles(result);
                     if (!useSnapshot) {
-                        Toast.makeText(this,
-                                "离线模式（仅本地已下载内容）", Toast.LENGTH_SHORT).show();
+                        toast("离线模式（仅本地已下载内容）", Toast.LENGTH_SHORT);
                     } else {
-                        Toast.makeText(this,
-                                "离线模式", Toast.LENGTH_SHORT).show();
+                        toast("离线模式", Toast.LENGTH_SHORT);
                     }
                 }
                 updatePathDisplay();
@@ -593,8 +595,7 @@ public class MainActivity extends AppCompatActivity implements
                     // 再加一层退避只会增加复杂度，还可能在误判时挡住正常请求。
                     if (isRateLimitError(e)) {
                         if (rlog != null) rlog.w(TAG, "服务端返回 429（限流）: " + requestPath);
-                        Toast.makeText(MainActivity.this,
-                                "服务器繁忙，请稍后再试", Toast.LENGTH_SHORT).show();
+                        toast("服务器繁忙，请稍后再试", Toast.LENGTH_SHORT);
                     }
 
                     mainHandler.post(() -> {
@@ -603,8 +604,7 @@ public class MainActivity extends AppCompatActivity implements
 
                         // 已经有缓存内容在显示：静默失败即可，不打断浏览
                         if (fileListAdapter.getItemCount() > 0) {
-                            Toast.makeText(MainActivity.this,
-                                    "刷新失败，显示的是缓存数据", Toast.LENGTH_SHORT).show();
+                            toast("刷新失败，显示的是缓存数据", Toast.LENGTH_SHORT);
                             return;
                         }
 
@@ -613,16 +613,14 @@ public class MainActivity extends AppCompatActivity implements
                         //   离线点开必然播放失败）
                         int localCount = cacheManager.getOfflineFileCount();
                         if (localCount > 0) {
-                            Toast.makeText(MainActivity.this,
-                                    "网络连接失败，切换到离线模式（本地已存 "
+                            toast("网络连接失败，切换到离线模式（本地已存 "
                                             + localCount + " 首）",
-                                    Toast.LENGTH_SHORT).show();
+                                    Toast.LENGTH_SHORT);
                             isOfflineMode = true;
                             updateNetworkStatus();
                             showLocalDownloads(token, requestPath);
                         } else {
-                            Toast.makeText(MainActivity.this,
-                                    "加载失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                            toast("加载失败: " + e.getMessage(), Toast.LENGTH_LONG);
                         }
                     });
                 }
@@ -678,7 +676,7 @@ public class MainActivity extends AppCompatActivity implements
 
         if (!NetworkUtils.isNetworkConnected(this)) {
             swipeRefreshLayout.setRefreshing(false);
-            Toast.makeText(this, "网络未连接", Toast.LENGTH_SHORT).show();
+            toast("网络未连接", Toast.LENGTH_SHORT);
             return;
         }
 
@@ -698,15 +696,14 @@ public class MainActivity extends AppCompatActivity implements
             // 离线模式下，未下载的歌曲无法播放 —— 提前给明确提示，
             // 而不是让 MediaPlayer 抛一个含糊的错误
             if (isOfflineMode && !cacheManager.isDownloaded(file.getHref())) {
-                Toast.makeText(this,
-                        "离线模式：该歌曲未下载，无法播放\n联网后可播放或先下载",
-                        Toast.LENGTH_LONG).show();
+                toast("离线模式：该歌曲未下载，无法播放\n联网后可播放或先下载",
+                        Toast.LENGTH_LONG);
                 return;
             }
             // 播放音频文件
             playAudioFile(file);
         } else {
-            Toast.makeText(this, "暂不支持预览此类文件: " + file.getDisplayName(), Toast.LENGTH_SHORT).show();
+            toast("暂不支持预览此类文件: " + file.getDisplayName(), Toast.LENGTH_SHORT);
         }
     }
     
@@ -808,7 +805,7 @@ public class MainActivity extends AppCompatActivity implements
     
     private void downloadFile(WebDAVFile file) {
         if (!NetworkUtils.isNetworkConnected(this)) {
-            Toast.makeText(this, "网络不可用，无法下载", Toast.LENGTH_SHORT).show();
+            toast("网络不可用，无法下载", Toast.LENGTH_SHORT);
             return;
         }
         
@@ -844,7 +841,7 @@ public class MainActivity extends AppCompatActivity implements
                         file.setLocalPath(destFile.getAbsolutePath());
                         fileListAdapter.updateFile(file);
                         
-                        Toast.makeText(MainActivity.this, "下载完成: " + file.getDisplayName(), Toast.LENGTH_SHORT).show();
+                        toast("下载完成: " + file.getDisplayName(), Toast.LENGTH_SHORT);
                     });
                 }
                 
@@ -856,7 +853,7 @@ public class MainActivity extends AppCompatActivity implements
                         file.setDownloadState(WebDAVFile.DownloadState.NOT_DOWNLOADED);
                         fileListAdapter.updateFile(file);
                         
-                        Toast.makeText(MainActivity.this, "下载失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                        toast("下载失败: " + e.getMessage(), Toast.LENGTH_LONG);
                     });
                 }
             });
@@ -873,7 +870,7 @@ public class MainActivity extends AppCompatActivity implements
                     file.setLocalPath(null);
                     fileListAdapter.updateFile(file);
                     
-                    Toast.makeText(this, "已删除本地文件: " + file.getDisplayName(), Toast.LENGTH_SHORT).show();
+                    toast("已删除本地文件: " + file.getDisplayName(), Toast.LENGTH_SHORT);
                 })
                 .setNegativeButton("取消", null)
                 .show();
@@ -913,7 +910,7 @@ public class MainActivity extends AppCompatActivity implements
     }
     
     private void showRenameDialog(WebDAVFile file) {
-        Toast.makeText(this, "重命名功能待实现", Toast.LENGTH_SHORT).show();
+        toast("重命名功能待实现", Toast.LENGTH_SHORT);
     }
     
     private void shareFile(WebDAVFile file) {
@@ -925,10 +922,10 @@ public class MainActivity extends AppCompatActivity implements
                 shareIntent.putExtra(Intent.EXTRA_STREAM, Uri.fromFile(localFile));
                 startActivity(Intent.createChooser(shareIntent, "分享文件"));
             } else {
-                Toast.makeText(this, "本地文件不存在", Toast.LENGTH_SHORT).show();
+                toast("本地文件不存在", Toast.LENGTH_SHORT);
             }
         } else {
-            Toast.makeText(this, "请先下载文件", Toast.LENGTH_SHORT).show();
+            toast("请先下载文件", Toast.LENGTH_SHORT);
         }
     }
     
@@ -940,11 +937,11 @@ public class MainActivity extends AppCompatActivity implements
      */
     private void showUploadDialog() {
         if (isOfflineMode) {
-            Toast.makeText(this, "离线模式下无法上传，请先连接网络", Toast.LENGTH_SHORT).show();
+            toast("离线模式下无法上传，请先连接网络", Toast.LENGTH_SHORT);
             return;
         }
         if (!webDAVClient.isConfigured()) {
-            Toast.makeText(this, "请先配置 WebDAV 服务器", Toast.LENGTH_SHORT).show();
+            toast("请先配置 WebDAV 服务器", Toast.LENGTH_SHORT);
             return;
         }
 
@@ -1040,9 +1037,8 @@ public class MainActivity extends AppCompatActivity implements
             } catch (Exception e) {
                 Log.e(TAG, "上传失败: " + displayName, e);
                 final String msg = e.getMessage() == null ? e.toString() : e.getMessage();
-                mainHandler.post(() -> Toast.makeText(MainActivity.this,
-                        "上传失败: " + displayName + "\n" + msg,
-                        Toast.LENGTH_LONG).show());
+                mainHandler.post(() -> toast("上传失败: " + displayName + "\n" + msg,
+                        Toast.LENGTH_LONG);.show());
             } finally {
                 if (tmp != null) {
                     //noinspection ResultOfMethodCallIgnored
@@ -1055,8 +1051,8 @@ public class MainActivity extends AppCompatActivity implements
 
     private void finishUpload() {
         dismissUploadProgressDialog();
-        Toast.makeText(this, "上传完成（" + uploadDone + "/" + uploadTotal + "）",
-                Toast.LENGTH_SHORT).show();
+        toast("上传完成（" + uploadDone + "/" + uploadTotal + "）",
+                Toast.LENGTH_SHORT);
         // 新文件已写入，当前目录的内存缓存必须失效，否则会继续显示旧列表
         invalidateDirCache(currentPath);
         // 刷新列表，让新文件立刻出现
@@ -1077,7 +1073,7 @@ public class MainActivity extends AppCompatActivity implements
                 .setNegativeButton("取消", (d, w) -> {
                     uploadQueue.clear();
                     dismissUploadProgressDialog();
-                    Toast.makeText(this, "已取消剩余上传", Toast.LENGTH_SHORT).show();
+                    toast("已取消剩余上传", Toast.LENGTH_SHORT);
                 })
                 .create();
         uploadDialog.show();
@@ -1183,10 +1179,13 @@ public class MainActivity extends AppCompatActivity implements
         
         if (currentTrack != null) {
             playerTitleTextView.setText(currentTrack.getDisplayName());
-            playerProgressBar.setMax(musicPlayer.getDuration());
+            int dur = musicPlayer.getDuration();
+            int cur = musicPlayer.getCurrentPosition();
+            playerProgressBar.setMax(dur);
             if (!isSeeking) {
-                playerProgressBar.setProgress(musicPlayer.getCurrentPosition());
+                playerProgressBar.setProgress(cur);
             }
+            updateTimeTexts(cur, dur);
             
             if (musicPlayer.isPlaying()) {
                 playPauseButton.setImageResource(R.drawable.ic_pause);
@@ -1237,13 +1236,47 @@ public class MainActivity extends AppCompatActivity implements
             if (!isSeeking) {
                 playerProgressBar.setProgress(position);
             }
+            updateTimeTexts(position, duration);
         });
+    }
+
+    /**
+     * 刷新"当前时间 / 总时长"文本。
+     *
+     * @param positionMs 当前播放位置（毫秒）；<=0 或时长未知时显示 00:00
+     * @param durationMs 总时长（毫秒）
+     */
+    private void updateTimeTexts(int positionMs, int durationMs) {
+        try {
+            if (playerCurrentTimeText != null) {
+                playerCurrentTimeText.setText(formatDuration(
+                        isSeeking ? playerProgressBar.getProgress() : positionMs));
+            }
+            if (playerTotalTimeText != null) {
+                playerTotalTimeText.setText(formatDuration(durationMs));
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** 毫秒 → mm:ss（超过 1 小时用 h:mm:ss） */
+    private String formatDuration(int ms) {
+        if (ms <= 0) return "00:00";
+        int totalSec = ms / 1000;
+        int h = totalSec / 3600;
+        int m = (totalSec % 3600) / 60;
+        int s = totalSec % 60;
+        if (h > 0) {
+            return String.format(java.util.Locale.US, "%d:%02d:%02d", h, m, s);
+        }
+        return String.format(java.util.Locale.US, "%02d:%02d", m, s);
     }
     
     @Override
     public void onError(String error) {
         mainHandler.post(() -> {
-            Toast.makeText(this, "播放错误: " + error, Toast.LENGTH_LONG).show();
+            // MusicPlayer 传来的 error 已含"播放错误: "前缀，这里不再重复拼接
+            toast(error, Toast.LENGTH_LONG);
         });
     }
     
@@ -1285,7 +1318,7 @@ public class MainActivity extends AppCompatActivity implements
                 .setPositiveButton("清空", (dialog, which) -> {
                     cacheManager.clearAllCache();
                     fileListAdapter.setFiles(new ArrayList<>());
-                    Toast.makeText(this, "缓存已清空", Toast.LENGTH_SHORT).show();
+                    toast("缓存已清空", Toast.LENGTH_SHORT);
                 })
                 .setNegativeButton("取消", null)
                 .show();
@@ -1382,14 +1415,13 @@ public class MainActivity extends AppCompatActivity implements
     /** 手动上报日志（菜单触发），并告知本地路径便于排查 */
     private void uploadLogManually() {
         if (rlog == null) {
-            Toast.makeText(this, "日志组件未初始化", Toast.LENGTH_SHORT).show();
+            toast("日志组件未初始化", Toast.LENGTH_SHORT);
             return;
         }
         rlog.i(TAG, "用户手动触发日志上报");
         rlog.upload("用户手动上报");
-        Toast.makeText(this,
-                "正在上报日志…\n（约几秒后可在服务器查看）",
-                Toast.LENGTH_LONG).show();
+        toast("正在上报日志…\n（约几秒后可在服务器查看）",
+                Toast.LENGTH_LONG);
     }
 
     /** Android 13(T) 及以上申请通知权限；低版本无需申请 */
@@ -1554,7 +1586,7 @@ public class MainActivity extends AppCompatActivity implements
         refreshOfflineFlag();
         if (wasOffline && !isOfflineMode) {
             if (rlog != null) rlog.i(TAG, "回到前台检测到网络恢复，重新加载在线数据");
-            Toast.makeText(this, "网络已恢复", Toast.LENGTH_SHORT).show();
+            toast("网络已恢复", Toast.LENGTH_SHORT);
             loadCurrentPath();
         }
 
@@ -1605,6 +1637,31 @@ public class MainActivity extends AppCompatActivity implements
             rlog.i(TAG, "<<< onStop（不可见，锁屏/切后台）");
             // 到后台时立刻上报一次，确保即便随后被系统杀死也能拿到现场日志
             rlog.upload("onStop 自动上报");
+        }
+    }
+
+
+    // ---- Toast 单例（新提示覆盖旧提示） ----
+    //
+    // 默认的 Toast.makeText().show() 会把提示排入队列，连续触发时
+    // 会依次弹完 —— 用户看到的是"过期的提示还在弹"，尤其切歌报错这类
+    // 场景会堆出好几条。这里维护一个单例 Toast，新提示直接替换旧提示，
+    // 永远只显示最新的一条。
+    private Toast currentToast;
+
+    private void toast(String message) {
+        toast(message, Toast.LENGTH_SHORT);
+    }
+
+    private void toast(String message, int duration) {
+        try {
+            if (currentToast != null) {
+                currentToast.cancel();   // 取消上一条，避免排队
+            }
+            currentToast = Toast.makeText(this, message, duration);
+            currentToast.show();
+        } catch (Exception e) {
+            Log.w(TAG, "显示提示失败: " + e.getMessage());
         }
     }
 
