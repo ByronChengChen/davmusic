@@ -485,6 +485,10 @@ public class LocalCacheManager {
     private JSONObject fileToJson(WebDAVFile file) throws JSONException {
         JSONObject json = new JSONObject();
         json.put("href", file.getHref());
+        // relativePath 必须持久化：导航、下载地址构造都依赖它，
+        // 快照恢复后若缺失会退化成用 displayName 拼路径 —— 中文与
+        // 特殊字符场景下会拼错路径，进而出现 404 或列表错乱
+        json.put("relativePath", file.getRelativePath());
         json.put("displayName", file.getDisplayName());
         json.put("contentLength", file.getContentLength());
         json.put("contentType", file.getContentType());
@@ -499,6 +503,15 @@ public class LocalCacheManager {
     private WebDAVFile jsonToFile(JSONObject json) throws JSONException {
         WebDAVFile file = new WebDAVFile();
         file.setHref(json.optString("href"));
+        // 兼容旧版快照：此前未保存 relativePath，缺失时从 href 推导
+        String rel = json.optString("relativePath", "");
+        if (rel.isEmpty()) {
+            String href = file.getHref();
+            if (href != null && !href.isEmpty()) {
+                rel = href.startsWith("/") ? href.substring(1) : href;
+            }
+        }
+        file.setRelativePath(rel);
         file.setDisplayName(json.optString("displayName"));
         file.setContentLength(json.optLong("contentLength"));
         file.setContentType(json.optString("contentType"));

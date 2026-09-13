@@ -10,10 +10,29 @@ android {
         applicationId "com.byron.davmusic"
         minSdk 26
         targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        versionCode 118
+        versionName "1.18"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+
+        // 把 git 提交号注入 BuildConfig.GIT_COMMIT，便于在「关于」里
+        // 确认手上这个包装的是哪次提交（CI 会设置 GITHUB_SHA 环境变量）
+        String commit = System.getenv("GITHUB_SHA")
+        if (commit == null || commit.isEmpty()) {
+            try {
+                commit = "git rev-parse --short HEAD".execute(
+                        null, rootProject).text.trim()
+            } catch (Exception ignored) {
+                commit = "local"
+            }
+        }
+        if (commit == null || commit.isEmpty()) commit = "local"
+        buildConfigField "String", "GIT_COMMIT", "\"${commit.take(7)}\""
+    }
+
+    // 需要在 BuildConfig 中使用自定义字段
+    buildFeatures {
+        buildConfig true
     }
 
     // 固定签名配置。

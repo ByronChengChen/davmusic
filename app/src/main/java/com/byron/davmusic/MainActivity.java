@@ -360,19 +360,25 @@ public class MainActivity extends AppCompatActivity implements
      */
     private void showLocalDownloads(final int token, final String requestPath) {
         executorService.execute(() -> {
-            // 1) 优先用快照（完整目录）
+            // 主数据源：该目录的云端快照（完整列表，含未下载项）
             List<WebDAVFile> listed = cacheManager.loadSnapshot(requestPath);
             boolean fromSnapshot = listed != null && !listed.isEmpty();
 
-            // 2) 快照缺失：用已下载文件反推目录结构
             List<WebDAVFile> items;
             if (fromSnapshot) {
                 items = listed;
             } else {
+                // 快照缺失（该目录从未联网浏览过，或缓存被清理）：
+                // 退化为"本地已下载 + 由此推导的目录"
                 items = cacheManager.listLocalTree(requestPath);
             }
 
-            // 无论来源如何，都刷新一次下载状态标记
+            // 关键：与本地已下载内容做并集。
+            // 快照可能早于某次下载（下载后没再进过该目录），
+            // 只信快照会让"刚下载的歌"消失；只信本地则会让
+            // "未下载的歌"消失。两者并集才能既完整又准确。
+            items = mergeWithLocal(requestPath, items);
+
             if (!items.isEmpty()) {
                 updateFileDownloadStates(items);
             }
@@ -441,9 +447,14 @@ public class MainActivity extends AppCompatActivity implements
                     updateFileDownloadStates(files);
 
                     // 只有拿到内容才覆盖快照 —— 避免一次空响应用空列表
-                    // 把之前缓存好的目录数据抹掉
+                    // 把之前缓存好的目录数据抹掉。
+                    //
+                    // 必须用 requestPath 而非 currentPath：快照的 key 表示
+                    // "这份数据属于哪个目录"。若用 currentPath，当用户已切到
+                    // 别的目录、而这个旧请求恰好通过校验（边界情况）时，
+                    // 会把 A 目录的内容写进 B 目录的快照，导致内容错乱与闪烁。
                     if (files != null && !files.isEmpty()) {
-                        cacheManager.saveSnapshot(currentPath, files);
+                        cacheManager.saveSnapshot(requestPath, files);
                     }
 
                     // 更新 UI
@@ -1145,11 +1156,48 @@ public class MainActivity extends AppCompatActivity implements
     }
     
     private void showAboutDialog() {
+        String version = getAppVersionName();
+        String msg = "DavMusic v" + version
+                + "\n\nWebDAV 音乐播放器"
+                + "\n\n功能："
+                + "\n· 浏览 WebDAV 上的音乐目录"
+                + "\n· 在线播放 / 下载后离线播放"
+                + "\n· 后台与锁屏连续播放（前台服务）"
+                + "\n· 上传文件到当前目录"
+                + "\n\n构建信息："
+                + "\n· 版本号 " + version
+                + "（versionCode " + getAppVersionCode() + "）"
+                + "\n· 提交 " + BuildConfig.GIT_COMMIT;
         new AlertDialog.Builder(this)
                 .setTitle("关于 DavMusic")
-                .setMessage("DavMusic v1.0\nWebDAV 音乐播放器")
+                .setMessage(msg)
                 .setPositiveButton("确定", null)
                 .show();
+    }
+
+    /** 读取 APK 中声明的版本名，避免手写版本号与实际安装包不一致 */
+    private String getAppVersionName() {
+        try {
+            return getPackageManager()
+                    .getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "unknown";
+        }
+    }
+
+    /** 读取 APK 中声明的 versionCode */
+    private long getAppVersionCode() {
+        try {
+            android.content.pm.PackageInfo pi = getPackageManager()
+                    .getPackageInfo(getPackageName(), 0);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                return pi.getLongVersionCode();
+            }
+            //noinspection deprecation
+            return pi.versionCode;
+        } catch (Exception e) {
+            return -1;
+        }
     }
     
     private void showLoading(String message) {
@@ -1273,6 +1321,45 @@ public class MainActivity extends AppCompatActivity implements
             return true;
         }
         return false;
+    }
+
+    /**
+     * 把"本地已下载内容"并入给定列表。
+     *
+     * 为什么需要并集：快照与本地下载是两个独立演进的集合，各有一部分
+     * 对方没有的数据 ——
+     *   · 快照有"未下载的歌"（离线时只能展示、不能播）
+     *   · 本地有"下载后没再进过该目录的歌"（快照里可能还没有）
+     * 只取其一都会丢内容：只信快照→刚下载的歌消失；
+     * 只信本地→未下载的歌消失。两者并集才完整。
+     *
+     * 合并规则：按 href 去重，已存在的保留（快照版本信息更全）。
+     */
+    private List<WebDAVFile> mergeWithLocal(String dirPath, List<WebDAVFile> fromSnapshot) {
+        List<WebDAVFile> result = new ArrayList<>();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+
+        if (fromSnapshot != null) {
+            for (WebDAVFile f : fromSnapshot) {
+                if (f == null) continue;
+                String key = f.getHref() == null ? f.getRelativePath() : f.getHref();
+                if (key == null) continue;
+                if (seen.add(key)) result.add(f);
+            }
+        }
+
+        // 并入本地已下载（含由此推导的子目录）
+        List<WebDAVFile> local = cacheManager.listLocalTree(dirPath);
+        for (WebDAVFile f : local) {
+            if (f == null) continue;
+            String key = f.getHref() == null ? f.getRelativePath() : f.getHref();
+            if (key == null) continue;
+            if (seen.add(key)) {
+                result.add(f);
+            }
+        }
+
+        return result;
     }
 
     /** 把内容滚动到上次位置（恢复时调用，避免跳到列表顶部） */
