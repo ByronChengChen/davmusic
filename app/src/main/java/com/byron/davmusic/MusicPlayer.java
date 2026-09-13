@@ -197,7 +197,24 @@ public class MusicPlayer {
             Log.w(TAG, "setAudioAttributes 失败: " + e.getMessage());
         }
 
-        mediaPlayer.setOnPreparedListener(mp -> {
+        bindCurrentPlayerListeners();
+
+        // 设置进度更新定时器
+        handler.postDelayed(progressUpdater, 1000);
+    }
+    /**
+     * 给当前的 mediaPlayer 绑定所有监听器。
+     *
+     * 抽成独立方法的原因：采用 setNextMediaPlayer 后，播完时 native 层会把
+     * 预加载的那个实例"顶上"成为当前播放器（见 onCompletion）。新实例必须
+     * 绑定同一套监听器，否则下一首播完就再也不会触发 onCompletion，
+     * 自动切歌链条在第一首之后就断了。
+     */
+    private void bindCurrentPlayerListeners() {
+        final android.media.MediaPlayer mpCur = mediaPlayer;
+        if (mpCur == null) return;
+
+        mpCur.setOnPreparedListener(mp -> {
             isPreparing = false;
             Log.d(TAG, "MediaPlayer prepared, starting playback");
             mp.start();
@@ -214,33 +231,59 @@ public class MusicPlayer {
             prepareNextTrack();
         });
         
-        mediaPlayer.setOnCompletionListener(mp -> {
+        mpCur.setOnCompletionListener(mp -> {
             Log.d(TAG, "Playback completed");
             logState("onCompletion 触发");
+
+            final boolean wasPreloaded = (preloadedPlayer != null);
             rlog.i(TAG, "onCompletion: currentPosition=" + currentPosition
                     + " playlistSize=" + (playlist == null ? -1 : playlist.size())
-                    + " hasPreloaded=" + (preloadedPlayer != null));
-            // 不能在 onCompletion 回调里直接切换曲目：
-            // play() 会调用 stop() → MediaPlayer.reset() + 重建实例，
-            // 等于在回调内部销毁回调的宿主，时序错乱会导致切歌失败或卡死。
-            // 用 handler 把切换动作挪到当前消息循环之外执行。
+                    + " hasPreloaded=" + wasPreloaded);
+
+            // 关于为什么要挪出回调：play() 会 stop() → reset() + 重建 MediaPlayer，
+            // 在回调内部销毁回调的宿主会导致时序错乱。
             handler.post(() -> {
                 rlog.i(TAG, "onCompletion handler 执行 (post 未被延迟丢弃)");
+
                 if (playlist == null || playlist.size() <= 1) {
-                    // 单曲或空列表：播完就停在当前曲目，不循环重播
                     rlog.i(TAG, "单曲或空列表，停止切歌");
                     notifyPlayStateChanged(false);
                     return;
                 }
-                // 走正常切歌流程：推进索引 → playFile → play()。
-                // 即使 MediaPlayer 原生已预加载下一首，这里仍重新走一遍，
-                // 因为它同时负责更新 currentPosition、通知 UI、以及
-                // 为"新的下一首"再次预加载 —— 保持状态单一可信。
+
+                if (wasPreloaded) {
+                    // 已预加载：MediaPlayer 在 native 层已经完成了切换，
+                    // 新的音频流正在播放。此时绝不能调用 playNext() ——
+                    // 它会走 play() → stop() → releasePreloadedPlayer()，
+                    // 把刚接手播放的那个实例销毁掉，导致"播完就静音"。
+                    //
+                    // 这里只做状态同步：推进索引、通知 UI、再预加载下下一首。
+                    rlog.i(TAG, "预加载已接管播放，仅同步状态（不重建 MediaPlayer）");
+
+                    currentPosition = (currentPosition + 1) % playlist.size();
+
+                    // 接手播放的实例已成为当前实例
+                    mediaPlayer = preloadedPlayer;
+                    preloadedPlayer = null;
+                    bindCurrentPlayerListeners();
+
+                    WebDAVFile now = playlist.get(currentPosition);
+                    currentUrl = resolvePlayUrl(now);
+                    notifyTrackChanged(now);
+                    notifyPlayStateChanged(true);
+
+                    // 为再下一首做预加载，保持流水线不断
+                    handler.postDelayed(this::prepareNextTrack, 1500);
+                    return;
+                }
+
+                // 没有预加载（首次播放、预加载失败、或单曲）：走常规切歌流程
+                rlog.i(TAG, "无预加载，走常规切歌流程");
                 playNext();
             });
         });
         
-        mediaPlayer.setOnErrorListener((mp, what, extra) -> {
+        mpCur.setOnErrorListener((mp, what, extra) -> {
             isPreparing = false;
             String detail = describeMediaError(what, extra);
             String error = "播放错误: " + detail;
@@ -252,7 +295,7 @@ public class MusicPlayer {
             return true;
         });
 
-        mediaPlayer.setOnInfoListener((mp, what, extra) -> {
+        mpCur.setOnInfoListener((mp, what, extra) -> {
             // 记录流媒体缓冲区信息，便于诊断弱网卡顿
             if (what == MediaPlayer.MEDIA_INFO_BUFFERING_START) {
                 Log.d(TAG, "缓冲开始");
@@ -261,11 +304,8 @@ public class MusicPlayer {
             }
             return false;
         });
-        
-        // 设置进度更新定时器
-        handler.postDelayed(progressUpdater, 1000);
     }
-    
+
     private Runnable progressUpdater = new Runnable() {
         @Override
         public void run() {
