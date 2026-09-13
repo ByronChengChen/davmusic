@@ -142,8 +142,12 @@ public class MainActivity extends AppCompatActivity implements
         // 加载当前路径（restored 时 currentPath 已指向上次所在目录）
         loadCurrentPath();
 
-        // 内容渲染完成后再恢复滚动位置
-        restoreScrollPos(savedInstanceState);
+        // 恢复滚动位置。必须在【数据灌入适配器之后】执行 —— 这里延迟
+        // 300ms 作为兜底，且 restoreScrollPos 内部还会校验项数是否足够。
+        // 只在 Activity 重建（savedInstanceState 非空）时才有意义。
+        if (savedInstanceState != null) {
+            mainHandler.postDelayed(() -> restoreScrollPos(savedInstanceState), 300);
+        }
 
         // 若此前已在播放（服务仍在运行），确保前台服务处于活动状态。
         // 这样即便 Activity 被回收重建，保活链条也不会断。
@@ -305,7 +309,16 @@ public class MainActivity extends AppCompatActivity implements
         final String requestPath = currentPath;
 
         // 返回时先清空列表，避免把上一个目录的文件短暂显示成当前目录的内容。
+        // 若下面命中快照会立刻重新填充。
         fileListAdapter.setFiles(new ArrayList<>());
+
+        // 切换目录后把列表滚回顶部。
+        // 否则 RecyclerView 会保留上一个目录的滚动偏移，导致新目录的
+        // 前几项被顶出视野 —— 用户会以为"某个目录消失了"
+        // （实测：从子目录返回后，列表停在中间，前 7 项不可见）。
+        if (recyclerView != null) {
+            recyclerView.scrollToPosition(0);
+        }
 
         final boolean online = !isOfflineMode && NetworkUtils.isNetworkConnected(this);
 
@@ -1385,18 +1398,39 @@ public class MainActivity extends AppCompatActivity implements
         return result;
     }
 
-    /** 把内容滚动到上次位置（恢复时调用，避免跳到列表顶部） */
+    /**
+     * 把内容滚动到上次位置。
+     *
+     * 仅在 Activity 被系统回收后重建时使用（savedInstanceState 非空）。
+     *
+     * 关键约束：必须在【数据已经灌入适配器之后】才能 scrollToPosition。
+     * 原实现放在 onCreate 里，此时列表还是空的 —— 滚动请求落空，
+     * 等异步数据到达后 RecyclerView 行为不确定（可能保留偏移、
+     * 也可能跳回顶部），表现为"条目时有时无"。
+     *
+     * 另外注意：目录切换（进入/返回）不应该滚动 —— 那会让用户
+     * 误以为某个条目"消失"（实际只是被滚出视野）。只有 Activity
+     * 重建这一种场景才需要恢复滚动位置。
+     */
     private void restoreScrollPos(Bundle savedInstanceState) {
         if (savedInstanceState == null || recyclerView == null) return;
         final int pos = savedInstanceState.getInt(STATE_SCROLL, -1);
-        if (pos > 0) {
-            recyclerView.post(() -> {
-                try {
+        if (pos <= 0) return;
+
+        if (rlog != null) rlog.i(TAG, "恢复滚动位置: " + pos);
+
+        recyclerView.post(() -> {
+            try {
+                if (fileListAdapter != null && fileListAdapter.getItemCount() > pos) {
                     recyclerView.scrollToPosition(pos);
-                } catch (Exception ignored) {
+                } else if (rlog != null) {
+                    rlog.i(TAG, "跳过滚动恢复：列表尚未就绪或项数不足（"
+                            + (fileListAdapter == null ? -1
+                               : fileListAdapter.getItemCount()) + " ≤ " + pos + "）");
                 }
-            });
-        }
+            } catch (Exception ignored) {
+            }
+        });
     }
 
     @Override
