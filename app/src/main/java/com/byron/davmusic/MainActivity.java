@@ -69,6 +69,19 @@ public class MainActivity extends AppCompatActivity implements
     private boolean isOfflineMode = false;
     private boolean isSeeking = false;   // 用户正在拖动进度条时，暂停自动刷新
 
+    /**
+     * 目录加载请求序号。
+     *
+     * 解决的问题：目录列表有多个异步渲染路径（快照、网络、离线列举、
+     * 失败回退），它们都通过 setFiles() 更新同一个适配器。若两个请求
+     * 交叠（例如快速"进目录→返回"），后完成的会覆盖先完成的 ——
+     * 表现为列表内容闪烁、条目时有时无。
+     *
+     * 用法：发起加载时 ++loadToken 并记下局部值，异步回调里先比对
+     * 是否仍等于当前 loadToken，不等就说明已有更新的请求，直接丢弃。
+     */
+    private int loadToken = 0;
+
     // ---- 上传相关 ----
     /** 系统文件选择器（SAF），可多选；无需存储权限 */
     private androidx.activity.result.ActivityResultLauncher<String[]> uploadPicker;
@@ -286,30 +299,35 @@ public class MainActivity extends AppCompatActivity implements
         updateNetworkStatus();
         updatePathDisplay();
 
+        // 本次加载的序号：所有异步回调都必须携带它回来比对，
+        // 否则交叠的旧请求会覆盖新请求的结果（列表闪烁、条目时有时无）
+        final int token = ++loadToken;
+        final String requestPath = currentPath;
+
         // 返回时先清空列表，避免把上一个目录的文件短暂显示成当前目录的内容。
         fileListAdapter.setFiles(new ArrayList<>());
 
         final boolean online = !isOfflineMode && NetworkUtils.isNetworkConnected(this);
 
-        // 离线：直接列出本地已下载歌曲（不需要云端快照）
+        // 离线：显示完整目录（快照为主，本地文件兜底）
         if (!online) {
-            showLocalDownloads();
+            showLocalDownloads(token, requestPath);
             swipeRefreshLayout.setRefreshing(false);
             return;
         }
 
         // 在线：缓存优先 —— 有快照先渲染，再去网络拉最新
         boolean rendered = false;
-        List<WebDAVFile> cached = cacheManager.loadSnapshot(currentPath);
+        List<WebDAVFile> cached = cacheManager.loadSnapshot(requestPath);
         if (cached != null && !cached.isEmpty()) {
             updateFileDownloadStates(cached);
             fileListAdapter.setFiles(cached);
             fileListAdapter.setOfflineMode(false);
             rendered = true;
-            Log.d(TAG, "命中快照，先渲染 " + cached.size() + " 项: " + currentPath);
+            Log.d(TAG, "命中快照，先渲染 " + cached.size() + " 项: " + requestPath);
         }
 
-        loadFromServer(!rendered);
+        loadFromServer(!rendered, token, requestPath);
     }
 
     /**
@@ -340,10 +358,10 @@ public class MainActivity extends AppCompatActivity implements
      * 提示需要联网，而不是像之前那样"整个目录都看不到"或"只看到零星
      * 几个下载过的文件"。
      */
-    private void showLocalDownloads() {
+    private void showLocalDownloads(final int token, final String requestPath) {
         executorService.execute(() -> {
             // 1) 优先用快照（完整目录）
-            List<WebDAVFile> listed = cacheManager.loadSnapshot(currentPath);
+            List<WebDAVFile> listed = cacheManager.loadSnapshot(requestPath);
             boolean fromSnapshot = listed != null && !listed.isEmpty();
 
             // 2) 快照缺失：用已下载文件反推目录结构
@@ -351,7 +369,7 @@ public class MainActivity extends AppCompatActivity implements
             if (fromSnapshot) {
                 items = listed;
             } else {
-                items = cacheManager.listLocalTree(currentPath);
+                items = cacheManager.listLocalTree(requestPath);
             }
 
             // 无论来源如何，都刷新一次下载状态标记
@@ -363,6 +381,11 @@ public class MainActivity extends AppCompatActivity implements
             final List<WebDAVFile> result = items;
 
             mainHandler.post(() -> {
+                // 过期结果直接丢弃（快速"进目录→返回"时最关键的保护）
+                if (token != loadToken || !requestPath.equals(currentPath)) {
+                    Log.d(TAG, "丢弃过期的离线列表: " + requestPath);
+                    return;
+                }
                 fileListAdapter.setOfflineMode(true);
 
                 if (result.isEmpty()) {
@@ -392,15 +415,28 @@ public class MainActivity extends AppCompatActivity implements
      * @param showLoading 是否显示加载指示。命中快照时传 false ——
      *                    已经有内容在显示，不该再盖一层 loading 遮罩。
      */
-    private void loadFromServer(boolean showLoading) {
+    /**
+     * 从服务器加载。
+     *
+     * @param token       发起时的加载序号；回调中若已过期则整体丢弃
+     * @param requestPath 发起时的路径；与 token 一起用于丢弃过期结果
+     */
+    private void loadFromServer(boolean showLoading, final int token, final String requestPath) {
         if (showLoading) {
             showLoading("正在加载...");
         }
 
         executorService.execute(() -> {
-            webDAVClient.listFolder(currentPath, new WebDAVClient.WebDAVCallback<List<WebDAVFile>>() {
+            webDAVClient.listFolder(requestPath, new WebDAVClient.WebDAVCallback<List<WebDAVFile>>() {
                 @Override
                 public void onSuccess(List<WebDAVFile> files) {
+                    // 已有更新的加载请求 → 丢弃本次结果。
+                    // 必须同时校验 token 与路径：仅有 token 不足以排除
+                    // "同一 token 但路径已变"的情况。
+                    if (token != loadToken || !requestPath.equals(currentPath)) {
+                        Log.d(TAG, "丢弃过期的加载结果: " + requestPath);
+                        return;
+                    }
                     // 更新文件的下载状态
                     updateFileDownloadStates(files);
 
@@ -422,6 +458,12 @@ public class MainActivity extends AppCompatActivity implements
                 @Override
                 public void onError(Exception e) {
                     Log.e(TAG, "加载失败: " + e.getMessage(), e);
+
+                    // 过期请求的失败不处理，否则会把新目录的界面搞乱
+                    if (token != loadToken || !requestPath.equals(currentPath)) {
+                        Log.d(TAG, "丢弃过期的错误回调: " + requestPath);
+                        return;
+                    }
 
                     mainHandler.post(() -> {
                         dismissLoading();
@@ -445,7 +487,7 @@ public class MainActivity extends AppCompatActivity implements
                                     Toast.LENGTH_SHORT).show();
                             isOfflineMode = true;
                             updateNetworkStatus();
-                            showLocalDownloads();
+                            showLocalDownloads(token, requestPath);
                         } else {
                             Toast.makeText(MainActivity.this,
                                     "加载失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
@@ -509,7 +551,10 @@ public class MainActivity extends AppCompatActivity implements
         }
 
         boolean hasContent = fileListAdapter.getItemCount() > 0;
-        loadFromServer(!hasContent);
+        // 刷新也走新的 token：如果用户在刷新过程中切换了目录，
+        // 刷新的结果不应覆盖新目录的内容
+        final int token = ++loadToken;
+        loadFromServer(!hasContent, token, currentPath);
     }
     
     @Override
