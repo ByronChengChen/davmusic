@@ -52,6 +52,21 @@ public class MusicService extends Service
     private RemoteLogger rlog;
     private boolean isForeground = false;
 
+    /**
+     * 媒体会话。
+     *
+     * 作用：接收蓝牙耳机/线控/锁屏等外部媒体按键。
+     * 必须【激活】（setActive(true)），系统才会把媒体按键路由给本应用。
+     *
+     * 关于按键语义：
+     *   单击 → 播放/暂停，双击 → 下一首，均为 Android 标准，
+     *   由系统或耳机固件转换成 MediaSession 回调。
+     *   三击【没有统一标准】—— 是否上报、上报成什么，取决于耳机固件。
+     *   这里把 KEYCODE_MEDIA_PREVIOUS / KEYCODE_MEDIA_PREVIOUS 一并注册，
+     *   若耳机上报上一首键就能响应。
+     */
+    private android.media.session.MediaSession mediaSession;
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -59,6 +74,7 @@ public class MusicService extends Service
         rlog.i(TAG, "MusicService onCreate");
 
         createChannel();
+        initMediaSession();
 
         player = MusicPlayer.getInstance(this);
         player.addPlaybackListener(this);
@@ -111,11 +127,185 @@ public class MusicService extends Service
         if (player != null) {
             player.removePlaybackListener(this);
         }
+        // 释放媒体会话，避免占用耳机按键路由
+        if (mediaSession != null) {
+            try {
+                mediaSession.setActive(false);
+                mediaSession.release();
+            } catch (Exception ignored) {
+            }
+            mediaSession = null;
+        }
         stopForegroundCompat();
         super.onDestroy();
     }
 
-    // ---------- 前台通知 ----------
+    // ---------- 媒体会话（蓝牙耳机/线控/锁屏按键） ----------
+
+    /**
+     * 初始化并激活 MediaSession。
+     *
+     * 关键点：
+     *  1. 必须 setActive(true)，系统才会把媒体按键路由到本应用。
+     *     未激活时耳机按键会被别的应用（或系统默认播放器）抢走。
+     *  2. 同时设置 PlaybackState 的 actions 位掩码 —— 系统根据它决定
+     *     哪些按键事件该转发过来（例如不含 ACTION_SKIP_TO_NEXT 时，
+     *     双击耳机不会触发下一首）。
+     *  3. 回调里统一走 MusicPlayer，保证与界面按钮行为一致。
+     */
+    private void initMediaSession() {
+        try {
+            mediaSession = new android.media.session.MediaSession(this, "DavMusic");
+
+            mediaSession.setCallback(new android.media.session.MediaSession.Callback() {
+
+                @Override
+                public void onPlay() {
+                    rlog.i(TAG, "媒体按键: onPlay");
+                    player.resume();
+                }
+
+                @Override
+                public void onPause() {
+                    rlog.i(TAG, "媒体按键: onPause");
+                    player.pause();
+                }
+
+                /**
+                 * 单击耳机键：系统会先给 onPlay/onPause；
+                 * 部分设备/固件也可能直接送 TOGGLE_PLAYBACK，
+                 * 因此这里也做完整处理。
+                 */
+                @Override
+                public void onSkipToNext() {
+                    rlog.i(TAG, "媒体按键: onSkipToNext（双击/下一首）");
+                    player.playNext();
+                }
+
+                @Override
+                public void onSkipToPrevious() {
+                    rlog.i(TAG, "媒体按键: onSkipToPrevious（上一首）");
+                    player.playPrevious();
+                }
+
+                @Override
+                public void onStop() {
+                    rlog.i(TAG, "媒体按键: onStop");
+                    player.stop();
+                }
+
+                /**
+                 * 原始按键兜底。
+                 *
+                 * 三击在不同耳机上可能上报为 KEYCODE_MEDIA_PREVIOUS，
+                 * 也可能上报为其它码。这里直接检查 KeyEvent，
+                 * 尽量把上一首/下一首识别出来。
+                 */
+                @Override
+                public boolean onMediaButtonEvent(android.content.Intent mediaButtonIntent) {
+                    try {
+                        if (mediaButtonIntent == null) return super.onMediaButtonEvent(mediaButtonIntent);
+                        android.view.KeyEvent ev = mediaButtonIntent.getParcelableExtra(
+                                android.content.Intent.EXTRA_KEY_EVENT);
+                        if (ev == null) return super.onMediaButtonEvent(mediaButtonIntent);
+
+                        // 只处理按下，避免抬升造成重复触发
+                        if (ev.getAction() != android.view.KeyEvent.ACTION_DOWN) {
+                            return true;
+                        }
+
+                        int code = ev.getKeyCode();
+                        rlog.i(TAG, "媒体按键原始事件: keyCode=" + code);
+
+                        switch (code) {
+                            case android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
+                            case android.view.KeyEvent.KEYCODE_HEADSETHOOK:
+                                player.togglePlayPause();
+                                return true;
+                            case android.view.KeyEvent.KEYCODE_MEDIA_NEXT:
+                                player.playNext();
+                                return true;
+                            case android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS:
+                                player.playPrevious();
+                                return true;
+                            case android.view.KeyEvent.KEYCODE_MEDIA_PLAY:
+                                player.resume();
+                                return true;
+                            case android.view.KeyEvent.KEYCODE_MEDIA_PAUSE:
+                                player.pause();
+                                return true;
+                            case android.view.KeyEvent.KEYCODE_MEDIA_STOP:
+                                player.stop();
+                                return true;
+                            default:
+                                return super.onMediaButtonEvent(mediaButtonIntent);
+                        }
+                    } catch (Exception e) {
+                        rlog.w(TAG, "onMediaButtonEvent 异常: " + e.getMessage());
+                        return super.onMediaButtonEvent(mediaButtonIntent);
+                    }
+                }
+            });
+
+            mediaSession.setActive(true);
+            updateMediaSessionState();
+            rlog.i(TAG, "MediaSession 已激活（蓝牙耳机按键可控制）");
+
+        } catch (Exception e) {
+            rlog.e(TAG, "MediaSession 初始化失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 同步播放状态到 MediaSession。
+     *
+     * 这一步是耳机按键能生效的前提：系统读取 PlaybackState 的 actions
+     * 决定哪些媒体按键要转发给本应用。必须同时声明 PLAY、PAUSE、
+     * SKIP_TO_NEXT、SKIP_TO_PREVIOUS、STOP，否则对应按键不会送达。
+     */
+    private void updateMediaSessionState() {
+        if (mediaSession == null || player == null) return;
+        try {
+            long actions = android.media.session.PlaybackState.ACTION_PLAY
+                    | android.media.session.PlaybackState.ACTION_PAUSE
+                    | android.media.session.PlaybackState.ACTION_PLAY_PAUSE
+                    | android.media.session.PlaybackState.ACTION_STOP
+                    | android.media.session.PlaybackState.ACTION_SKIP_TO_NEXT
+                    | android.media.session.PlaybackState.ACTION_SKIP_TO_PREVIOUS;
+
+            boolean playing = player.isPlaying();
+            int state = playing
+                    ? android.media.session.PlaybackState.STATE_PLAYING
+                    : android.media.session.PlaybackState.STATE_PAUSED;
+
+            android.media.session.PlaybackState.Builder b =
+                    new android.media.session.PlaybackState.Builder()
+                            .setActions(actions)
+                            .setState(state, player.getCurrentPosition(), playing ? 1f : 0f);
+
+            // 打开耳机键支持：系统据此决定是否把按键转给本应用
+            android.os.Bundle extras = new android.os.Bundle();
+            extras.putBoolean("android.media.session.extra.HEADSETHOOK_SUPPORTED", true);
+            b.setExtras(extras);
+
+            mediaSession.setPlaybackState(b.build());
+
+            // 同步当前曲目信息（锁屏/车机显示用）
+            WebDAVFile cur = player.getCurrentTrack();
+            if (cur != null) {
+                android.media.MediaMetadata.Builder mb =
+                        new android.media.MediaMetadata.Builder()
+                                .putString(android.media.MediaMetadata.METADATA_KEY_TITLE,
+                                        cur.getDisplayName())
+                                .putLong(android.media.MediaMetadata.METADATA_KEY_DURATION,
+                                        player.getDuration());
+                mediaSession.setMetadata(mb.build());
+            }
+        } catch (Exception e) {
+            rlog.w(TAG, "更新 MediaSession 状态失败: " + e.getMessage());
+        }
+    }
+
 
     private void createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -263,12 +453,17 @@ public class MusicService extends Service
         rlog.i(TAG, "onTrackChanged → 刷新通知: "
                 + (track == null ? "-" : track.getDisplayName()));
         refreshNotification();
+        // MediaSession 的曲目信息也要同步（锁屏/车机显示）
+        updateMediaSessionState();
     }
 
     @Override
     public void onPlayStateChanged(boolean isPlaying) {
         rlog.i(TAG, "onPlayStateChanged → 刷新通知: playing=" + isPlaying);
         refreshNotification();
+        // 必须同步 MediaSession 状态：系统依据 PlaybackState.actions
+        // 决定是否把耳机按键转发给本应用
+        updateMediaSessionState();
     }
 
     @Override
