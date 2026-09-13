@@ -13,6 +13,17 @@
          属于 normal 级权限，无需运行时申请。 -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- 前台服务：让播放服务在后台/锁屏时不被系统回收（实现保活）。
+         Android 9+ 需要 FOREGROUND_SERVICE；
+         Android 14+ 还必须声明具体的服务类型 MEDIA_PLAYBACK。
+         二者均为 normal 级权限，无需运行时申请。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+
+    <!-- Android 13+ 发送通知需要运行时授权；未授权时前台服务仍可运行，
+         只是通知不可见。 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -50,6 +61,15 @@
             android:theme="@style/Theme.DavMusic.NoActionBar"
             android:screenOrientation="portrait" />
         
+        <!-- 播放前台服务：承载播放状态与常驻通知，实现后台保活。
+             foregroundServiceType 必须与代码中 startForeground 声明的类型一致
+             （Android 14+ 强制校验，不一致会抛异常）。 -->
+        <service
+            android:name="com.byron.davmusic.MusicService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
         <!-- 文件提供者（用于文件共享） -->
         <provider
             android:name="androidx.core.content.FileProvider"

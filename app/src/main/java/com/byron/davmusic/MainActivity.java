@@ -72,6 +72,8 @@ public class MainActivity extends AppCompatActivity implements
     // ---- 上传相关 ----
     /** 系统文件选择器（SAF），可多选；无需存储权限 */
     private androidx.activity.result.ActivityResultLauncher<String[]> uploadPicker;
+    /** Android 13+ 通知权限申请 */
+    private androidx.activity.result.ActivityResultLauncher<String> notificationPermLauncher;
     /** 多选上传的队列，逐个串行上传 */
     private final java.util.Deque<Uri> uploadQueue = new java.util.ArrayDeque<>();
     private int uploadTotal = 0;
@@ -99,6 +101,18 @@ public class MainActivity extends AppCompatActivity implements
                     startUpload(uris);
                 });
 
+        // Android 13+ 通知需要运行时授权。未授权时前台服务仍能运行
+        // （保活有效），但通知不可见、锁屏控制缺失，因此主动申请一次。
+        notificationPermLauncher = registerForActivityResult(
+                new androidx.activity.result.contract.ActivityResultContracts
+                        .RequestPermission(),
+                granted -> {
+                    if (rlog != null) {
+                        rlog.i(TAG, "通知权限申请结果: " + granted);
+                    }
+                });
+        requestNotificationPermissionIfNeeded();
+
         // 无需运行时权限：下载写入的是 App 私有目录（getExternalFilesDir），
         // 上传通过系统文件选择器（SAF）由系统代读，均不需要存储权限。
         initViews();
@@ -117,6 +131,13 @@ public class MainActivity extends AppCompatActivity implements
 
         // 内容渲染完成后再恢复滚动位置
         restoreScrollPos(savedInstanceState);
+
+        // 若此前已在播放（服务仍在运行），确保前台服务处于活动状态。
+        // 这样即便 Activity 被回收重建，保活链条也不会断。
+        if (musicPlayer != null && musicPlayer.getCurrentTrack() != null) {
+            MusicService.start(this);
+            if (rlog != null) rlog.i(TAG, "检测到已有播放，重新确保前台服务运行");
+        }
 
         if (rlog != null) {
             rlog.i(TAG, "onCreate 完成: restored=" + restored
@@ -516,7 +537,12 @@ public class MainActivity extends AppCompatActivity implements
         if (startIndex != -1) {
             musicPlayer.setPlaylist(audioFiles, startIndex);
             musicPlayer.playFile(file);
-            
+
+            // 开始播放即启动前台服务：进入前台后进程优先级提升，
+            // 锁屏/切后台不会被系统回收，从而保证播放连续、
+            // Activity 也不会被销毁（避免"切回前台回到首页"）。
+            MusicService.start(this);
+
             // 显示播放器
             miniPlayerLayout.setVisibility(View.VISIBLE);
         }
@@ -1063,6 +1089,22 @@ public class MainActivity extends AppCompatActivity implements
         Toast.makeText(this,
                 "正在上报日志…\n（约几秒后可在服务器查看）",
                 Toast.LENGTH_LONG).show();
+    }
+
+    /** Android 13(T) 及以上申请通知权限；低版本无需申请 */
+    private void requestNotificationPermissionIfNeeded() {
+        try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                        != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    if (rlog != null) rlog.i(TAG, "申请通知权限（Android 13+）");
+                    notificationPermLauncher.launch(
+                            android.Manifest.permission.POST_NOTIFICATIONS);
+                }
+            }
+        } catch (Exception e) {
+            if (rlog != null) rlog.w(TAG, "通知权限申请失败: " + e.getMessage());
+        }
     }
 
     // ---- Activity 状态保存与恢复 ----

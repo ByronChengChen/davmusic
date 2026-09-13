@@ -69,6 +69,9 @@ dependencies {
     // appcompat 会传递引入 activity，但显式声明可避免 CI 上解析失败
     implementation 'androidx.activity:activity:1.9.3'
 
+    // 前台服务通知的 MediaStyle（androidx.media.app.NotificationCompat.MediaStyle）
+    implementation 'androidx.media:media:1.7.0'
+
     // 网络库 - WebDAV 通信 (PROPFIND/GET/PUT)
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 
