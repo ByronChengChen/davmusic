@@ -79,6 +79,11 @@ public class MusicService extends Service
         player = MusicPlayer.getInstance(this);
         player.addPlaybackListener(this);
 
+        // 服务可能在播放中途被重建，此时立即恢复进度刷新
+        if (player.isPlaying()) {
+            startProgressUpdates();
+        }
+
         // 服务创建即进入前台，避免被系统判定为后台服务而快速回收。
         // 即使此刻还没开始播放，也要先启动前台（Android 要求
         // startForegroundService 后 5 秒内必须调用 startForeground）。
@@ -124,6 +129,7 @@ public class MusicService extends Service
     @Override
     public void onDestroy() {
         rlog.i(TAG, "MusicService onDestroy");
+        stopProgressUpdates();
         if (player != null) {
             player.removePlaybackListener(this);
         }
@@ -290,7 +296,7 @@ public class MusicService extends Service
 
             mediaSession.setPlaybackState(b.build());
 
-            // 同步当前曲目信息（锁屏/车机显示用）
+            // 同步当前曲目信息（锁屏/车机/媒体控制中心显示用）
             WebDAVFile cur = player.getCurrentTrack();
             if (cur != null) {
                 android.media.MediaMetadata.Builder mb =
@@ -299,11 +305,72 @@ public class MusicService extends Service
                                         cur.getDisplayName())
                                 .putLong(android.media.MediaMetadata.METADATA_KEY_DURATION,
                                         player.getDuration());
+
+                // 从路径推断"艺术家 / 专辑"：WebDAV 上没有标签元数据，
+                // 但音乐通常按 艺术家/专辑/曲目 组织，这里用路径分段填充，
+                // 让媒体控制中心的副标题不再空白。
+                String[] parts = splitPath(cur.getRelativePath());
+                if (parts.length >= 1) {
+                    mb.putString(android.media.MediaMetadata.METADATA_KEY_ARTIST,
+                            parts[parts.length - 1]);
+                }
+                if (parts.length >= 2) {
+                    mb.putString(android.media.MediaMetadata.METADATA_KEY_ALBUM,
+                            parts[parts.length - 2]);
+                }
+
                 mediaSession.setMetadata(mb.build());
             }
         } catch (Exception e) {
             rlog.w(TAG, "更新 MediaSession 状态失败: " + e.getMessage());
         }
+    }
+
+    /** 拆分相对路径为各级片段（去掉文件名本身与首尾斜杠） */
+    private String[] splitPath(String relativePath) {
+        if (relativePath == null || relativePath.isEmpty()) return new String[0];
+        String p = relativePath;
+        while (p.startsWith("/")) p = p.substring(1);
+        while (p.endsWith("/")) p = p.substring(0, p.length() - 1);
+        if (p.isEmpty()) return new String[0];
+        // 去掉最后一段（文件名）
+        int lastSlash = p.lastIndexOf('/');
+        if (lastSlash > 0) p = p.substring(0, lastSlash);
+        else return new String[0];
+        if (p.isEmpty()) return new String[0];
+        return p.split("/");
+    }
+
+    // ---- 播放进度定时刷新 ----
+    //
+    // 必要性：PlaybackState 里的 position 是一个【静态快照】，
+    // 系统据此绘制进度条。若只在状态变化时更新一次，进度条会停住不动，
+    // 媒体控制中心也不显示"已播多久 / 还剩多久"。
+    // 因此需要周期性刷新（1 秒一次，与通知栏刷新同频）。
+
+    private final android.os.Handler progressHandler =
+            new android.os.Handler(android.os.Looper.getMainLooper());
+
+    private final Runnable progressTick = new Runnable() {
+        @Override
+        public void run() {
+            try {
+                if (player != null && player.isPlaying()) {
+                    updateMediaSessionState();
+                }
+            } catch (Exception ignored) {
+            }
+            progressHandler.postDelayed(this, 1000);
+        }
+    };
+
+    private void startProgressUpdates() {
+        progressHandler.removeCallbacks(progressTick);
+        progressHandler.postDelayed(progressTick, 1000);
+    }
+
+    private void stopProgressUpdates() {
+        progressHandler.removeCallbacks(progressTick);
     }
 
 
@@ -379,6 +446,17 @@ public class MusicService extends Service
                         .setShowActionsInCompactView(0, multi ? 1 : 0)   // 折叠态显示前几个
                         .setShowCancelButton(true)
                         .setCancelButtonIntent(servicePendingIntent(ACTION_STOP, 4));
+
+        // ⭐ 关键：把通知与 MediaSession 绑定。
+        //
+        // 这一步是"通知栏播控"与"系统媒体控制中心"合并为同一个会话的
+        // 唯一途径。缺少它时，系统看到的是一个孤立的媒体通知 ——
+        // 表现为媒体控制中心里多出一张独立卡片，而不是与其它 App
+        // 一样共用一个"当前播放"区域；也无法正确接管/让出控制权。
+        if (mediaSession != null) {
+            style.setMediaSession(mediaSession.getSessionToken());
+        }
+
         b.setStyle(style);
 
         return b.build();
@@ -464,6 +542,13 @@ public class MusicService extends Service
         // 必须同步 MediaSession 状态：系统依据 PlaybackState.actions
         // 决定是否把耳机按键转发给本应用
         updateMediaSessionState();
+
+        // 播放中启动秒级进度刷新，暂停/停止时关闭（省电）
+        if (isPlaying) {
+            startProgressUpdates();
+        } else {
+            stopProgressUpdates();
+        }
     }
 
     @Override
