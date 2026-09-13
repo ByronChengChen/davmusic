@@ -69,7 +69,7 @@ public class MusicService extends Service
     // 原因：androidx.media.app.NotificationCompat.MediaStyle 要求的是
     // MediaSessionCompat.Token，与平台版 Token 类型不兼容；且兼容层会
     // 统一处理各 Android 版本的行为差异。
-    private androidx.media.session.MediaSessionCompat mediaSession;
+    private android.support.v4.media.session.MediaSessionCompat mediaSession;
 
     @Override
     public void onCreate() {
@@ -165,10 +165,10 @@ public class MusicService extends Service
      */
     private void initMediaSession() {
         try {
-            mediaSession = new androidx.media.session.MediaSessionCompat(
+            mediaSession = new android.support.v4.media.session.MediaSessionCompat(
                     this, "DavMusic");
 
-            mediaSession.setCallback(new androidx.media.session.MediaSessionCompat.Callback() {
+            mediaSession.setCallback(new android.support.v4.media.session.MediaSessionCompat.Callback() {
 
                 @Override
                 public void onPlay() {
