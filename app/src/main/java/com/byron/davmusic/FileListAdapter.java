@@ -56,6 +56,23 @@ public class FileListAdapter extends RecyclerView.Adapter<FileListAdapter.ViewHo
             }
         }
         this.files = sortFiles(visible);
+
+        // 诊断日志：列表内容变化时完整记录一次。
+        // "条目时有时无"这类问题必须看到"每次渲染了哪些项"才能定位，
+        // 只看总数无法判断是数据源变了还是渲染被覆盖。
+        try {
+            StringBuilder sb = new StringBuilder();
+            sb.append("setFiles: 输入=").append(files == null ? 0 : files.size())
+              .append(" 可见=").append(this.files.size())
+              .append(" → ");
+            for (WebDAVFile f : this.files) {
+                sb.append(f.isCollection() ? "[D]" : "[F]")
+                  .append(f.getDisplayName()).append(" ");
+            }
+            RemoteLogger.getInstance(context).i("FileListAdapter", sb.toString());
+        } catch (Exception ignored) {
+        }
+
         notifyDataSetChanged();
     }
 

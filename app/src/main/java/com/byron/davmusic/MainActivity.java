@@ -324,7 +324,11 @@ public class MainActivity extends AppCompatActivity implements
             fileListAdapter.setFiles(cached);
             fileListAdapter.setOfflineMode(false);
             rendered = true;
-            Log.d(TAG, "命中快照，先渲染 " + cached.size() + " 项: " + requestPath);
+            if (rlog != null) {
+                rlog.i(TAG, "[在线] 命中快照 " + cached.size() + " 项: " + requestPath);
+            }
+        } else if (rlog != null) {
+            rlog.i(TAG, "[在线] 无快照: " + requestPath);
         }
 
         loadFromServer(!rendered, token, requestPath);
@@ -360,9 +364,15 @@ public class MainActivity extends AppCompatActivity implements
      */
     private void showLocalDownloads(final int token, final String requestPath) {
         executorService.execute(() -> {
+            if (rlog != null) rlog.i(TAG, "[离线] 开始列举: " + requestPath);
+
             // 主数据源：该目录的云端快照（完整列表，含未下载项）
             List<WebDAVFile> listed = cacheManager.loadSnapshot(requestPath);
             boolean fromSnapshot = listed != null && !listed.isEmpty();
+            if (rlog != null) {
+                rlog.i(TAG, "[离线] 快照" + (fromSnapshot ? "命中 " + listed.size() + " 项"
+                        : "缺失") + ": " + requestPath);
+            }
 
             List<WebDAVFile> items;
             if (fromSnapshot) {
@@ -620,11 +630,23 @@ public class MainActivity extends AppCompatActivity implements
             currentPath = currentPath.equals("/") ? "/" + name : currentPath + "/" + name;
         }
 
+        if (rlog != null) {
+            rlog.i(TAG, "进入目录: " + folder.getDisplayName()
+                    + " | relativePath=" + rel
+                    + " | href=" + folder.getHref()
+                    + " | isCollection=" + folder.isCollection()
+                    + " | → currentPath=" + currentPath
+                    + " | stack=" + pathStack);
+        }
+
         // 加载新路径
         loadCurrentPath();
     }
     
     private void navigateUp() {
+        if (rlog != null) {
+            rlog.i(TAG, "返回上级: 当前=" + currentPath + " stack=" + pathStack);
+        }
         if (pathStack.isEmpty()) {
             if (!currentPath.equals("/")) {
                 // 回到根目录
@@ -634,6 +656,7 @@ public class MainActivity extends AppCompatActivity implements
         } else {
             // 从栈中取出上一个路径
             currentPath = pathStack.remove(pathStack.size() - 1);
+            if (rlog != null) rlog.i(TAG, "返回后 currentPath=" + currentPath);
             loadCurrentPath();
         }
     }
