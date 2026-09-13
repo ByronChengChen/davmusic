@@ -177,6 +177,7 @@ public class MusicPlayer {
         }
         
         mediaPlayer = new MediaPlayer();
+        rlog.i(TAG, "initMediaPlayer: 新建实例 hash=" + mediaPlayer.hashCode());
 
         // 让 MediaPlayer 自己做 CPU 唤醒管理（内部持有 MediaPlayer 级别的
         // WakeLock），配合下面的 transitionWakeLock 覆盖切歌窗口。
@@ -201,6 +202,8 @@ public class MusicPlayer {
             Log.d(TAG, "MediaPlayer prepared, starting playback");
             mp.start();
             notifyPlayStateChanged(true);
+            rlog.i(TAG, "onPrepared 触发: mp=" + mp.hashCode()
+                    + " | 当前 mediaPlayer=" + (mediaPlayer == null ? "null" : mediaPlayer.hashCode()));
             logState("onPrepared");
             // 已开始播放，WakeLock 使命完成（MediaPlayer 自身会保持唤醒）
             releaseTransitionWakeLock();
@@ -338,16 +341,31 @@ public class MusicPlayer {
         
         try {
             isPreparing = true;
-            
+
+            // 注意：必须重新读取字段而非使用局部变量 —— stop() 内部的
+            // initMediaPlayer() 会 release 旧实例并 new 一个新实例，
+            // 若这里持有旧的引用，setDataSource/prepareAsync 会作用在
+            // 已 release 的对象上，表现为 prepareAsync 后 onPrepared 永不触发
+            // （日志表现为 play() 打印后就没有下文了）。
+            android.media.MediaPlayer mp = mediaPlayer;
+            if (mp == null) {
+                isPreparing = false;
+                releaseTransitionWakeLock();
+                notifyError("MediaPlayer 未就绪");
+                return;
+            }
+            rlog.i(TAG, "play 使用的是重建后的实例: mp=" + mp.hashCode());
+
             if (url.startsWith("file://") || url.startsWith("/")) {
                 // 本地文件播放
                 File file = new File(url.startsWith("file://") ? url.substring(7) : url);
                 if (!file.exists()) {
+                    isPreparing = false;
                     releaseTransitionWakeLock();
                     notifyError("本地文件不存在: " + url);
                     return;
                 }
-                mediaPlayer.setDataSource(file.getAbsolutePath());
+                mp.setDataSource(file.getAbsolutePath());
             } else {
                 // 在线播放
                 Uri uri = Uri.parse(url);
@@ -355,14 +373,17 @@ public class MusicPlayer {
                     // 有认证头的情况
                     Map<String, String> headers = new HashMap<>();
                     headers.put("Authorization", authHeaders.get("Authorization"));
-                    mediaPlayer.setDataSource(context, uri, headers);
+                    mp.setDataSource(context, uri, headers);
                 } else {
                     // 无认证头的情况
-                    mediaPlayer.setDataSource(context, uri);
+                    mp.setDataSource(context, uri);
                 }
             }
             
-            mediaPlayer.prepareAsync();
+            rlog.i(TAG, "准备 prepareAsync: mp=" + mp.hashCode());
+            mp.prepareAsync();
+            rlog.i(TAG, "已调用 prepareAsync: mp=" + mp.hashCode()
+                    + " | " + displayName);
             Log.d(TAG, "开始准备播放: " + displayName);
             
         } catch (IOException e) {
@@ -386,8 +407,10 @@ public class MusicPlayer {
      *   播完由 MediaPlayer 在 native 层直接切换到已缓冲好的流 ——
      *   不依赖 App 主线程被调度，也不需要切歌瞬间的网络请求。
      *
-     * 注意：setNextMediaPlayer 要求两个 MediaPlayer 的音频属性一致，
-     * 因此这里复用同一套 AudioAttributes（已在 initMediaPlayer 设置）。
+     * ⚠️ 关键约束：setNextMediaPlayer() 要求 next player 必须【已经 prepare
+     * 完成】，否则抛 IllegalStateException（getMessage() 为 null，极难排查）。
+     * 因此这里必须先 prepareAsync()，并在 onPrepared 回调里才挂上去。
+     * 这正是上一版"预加载失败: null"的原因。
      */
     private void prepareNextTrack() {
         if (mediaPlayer == null) return;
@@ -412,7 +435,10 @@ public class MusicPlayer {
 
             if (url.startsWith("file://") || url.startsWith("/")) {
                 File f = new File(url.startsWith("file://") ? url.substring(7) : url);
-                if (!f.exists()) return;
+                if (!f.exists()) {
+                    next.release();
+                    return;
+                }
                 next.setDataSource(f.getAbsolutePath());
             } else {
                 Uri uri = Uri.parse(url);
@@ -425,13 +451,50 @@ public class MusicPlayer {
                 }
             }
 
-            mediaPlayer.setNextMediaPlayer(next);
-            preloadedPlayer = next;
-            Log.d(TAG, "已预加载下一首: " + nextTrack.getDisplayName());
-            rlog.i(TAG, "预加载成功: " + nextTrack.getDisplayName());
+            final String nextName = nextTrack.getDisplayName();
+
+            // 必须等 prepare 完成才能交给 setNextMediaPlayer
+            next.setOnPreparedListener(prepared -> {
+                try {
+                    if (mediaPlayer == null) {
+                        prepared.release();
+                        return;
+                    }
+                    // 二次确认：当前曲目仍未切换（避免用户已手动切歌后误挂）
+                    String expect = resolvePlayUrl(
+                            playlist != null && currentPosition >= 0
+                                    && currentPosition < playlist.size()
+                                    ? playlist.get(currentPosition) : null);
+                    if (expect == null || !expect.equals(currentUrl)) {
+                        Log.d(TAG, "当前曲目已变化，丢弃预加载结果: " + nextName);
+                        prepared.release();
+                        return;
+                    }
+                    mediaPlayer.setNextMediaPlayer(prepared);
+                    preloadedPlayer = prepared;
+                    Log.d(TAG, "已预加载下一首: " + nextName);
+                    rlog.i(TAG, "预加载成功: " + nextName);
+                } catch (Exception ex) {
+                    rlog.w(TAG, "挂载预加载失败: " + ex.getClass().getSimpleName()
+                            + " / " + ex.getMessage());
+                    try { prepared.release(); } catch (Exception ignored) {}
+                    preloadedPlayer = null;
+                }
+            });
+
+            next.setOnErrorListener((mp, what, extra) -> {
+                rlog.w(TAG, "预加载播放器出错: what=" + what + " extra=" + extra
+                        + " (" + nextName + ")");
+                return true;
+            });
+
+            next.prepareAsync();   // ← 上一版漏掉的关键调用
+            Log.d(TAG, "预加载中: " + nextName);
+
         } catch (Exception e) {
-            Log.w(TAG, "预加载下一首失败（不影响当前播放）: " + e.getMessage());
-            rlog.w(TAG, "预加载失败: " + e.getMessage());
+            Log.w(TAG, "预加载下一首失败（不影响当前播放）: " + e);
+            rlog.w(TAG, "预加载失败: " + e.getClass().getSimpleName()
+                    + " / " + e.getMessage());
             if (next != null) {
                 try { next.release(); } catch (Exception ignored) {}
             }
@@ -661,6 +724,8 @@ public class MusicPlayer {
                 Log.w(TAG, "reset() 状态非法，已忽略: " + e.getMessage());
             }
             initMediaPlayer(); // 重新初始化 MediaPlayer
+            rlog.i(TAG, "stop(): 已重建 MediaPlayer, hashCode="
+                    + (mediaPlayer == null ? "null" : mediaPlayer.hashCode()));
             notifyPlayStateChanged(false);
         }
         // 释放预加载的下一首，避免重建 MediaPlayer 后旧实例残留。
