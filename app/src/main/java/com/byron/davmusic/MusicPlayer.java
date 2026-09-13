@@ -64,7 +64,18 @@ public class MusicPlayer {
         
         mediaPlayer.setOnCompletionListener(mp -> {
             Log.d(TAG, "Playback completed");
-            playNext();
+            // 不能在 onCompletion 回调里直接切换曲目：
+            // play() 会调用 stop() → MediaPlayer.reset() + 重建实例，
+            // 等于在回调内部销毁回调的宿主，时序错乱会导致切歌失败或卡死。
+            // 用 handler 把切换动作挪到当前消息循环之外执行。
+            handler.post(() -> {
+                if (playlist == null || playlist.size() <= 1) {
+                    // 单曲或空列表：播完就停在当前曲目，不循环重播
+                    notifyPlayStateChanged(false);
+                    return;
+                }
+                playNext();
+            });
         });
         
         mediaPlayer.setOnErrorListener((mp, what, extra) -> {
@@ -222,17 +233,47 @@ public class MusicPlayer {
         }
         
         play(url, file.getDisplayName());
-        
-        // 如果这个文件在播放列表中，更新当前位置
-        if (playlist != null) {
-            for (int i = 0; i < playlist.size(); i++) {
-                if (playlist.get(i).getHref().equals(file.getHref())) {
-                    currentPosition = i;
-                    notifyTrackChanged(file);
-                    break;
+
+        // 同步 currentPosition：只有当列表中的位置与当前记录不一致时才纠正。
+        // 注意不要无条件覆盖 —— playNext/playPrevious 已经推进过索引，
+        // 若这里再遍历一遍按 href 匹配，一旦匹配失败（href 编码差异、
+        // 列表已被刷新替换）就会把索引留在错误位置，
+        // 下次切歌就会跳错曲目。
+        if (playlist != null && !playlist.isEmpty()) {
+            boolean inSync = currentPosition >= 0
+                    && currentPosition < playlist.size()
+                    && sameFile(playlist.get(currentPosition), file);
+            if (!inSync) {
+                int idx = indexOfFile(file);
+                if (idx >= 0) {
+                    currentPosition = idx;
+                } else {
+                    // 不在列表中（例如刷新后列表已换）：把当前曲目插到列表首位，
+                    // 保证后续切歌仍有可播的目标，而不是从错误位置继续。
+                    playlist.add(0, file);
+                    currentPosition = 0;
                 }
             }
+            notifyTrackChanged(playlist.get(currentPosition));
         }
+    }
+
+    /** 判断两个文件是否同一首：优先 href，回退到 relativePath（href 可能编码不一致）*/
+    private boolean sameFile(WebDAVFile a, WebDAVFile b) {
+        if (a == null || b == null) return false;
+        String ha = a.getHref(), hb = b.getHref();
+        if (ha != null && ha.equals(hb)) return true;
+        String ra = a.getRelativePath(), rb = b.getRelativePath();
+        return ra != null && ra.equals(rb);
+    }
+
+    /** 在播放列表中定位文件；找不到返回 -1 */
+    private int indexOfFile(WebDAVFile file) {
+        if (playlist == null) return -1;
+        for (int i = 0; i < playlist.size(); i++) {
+            if (sameFile(playlist.get(i), file)) return i;
+        }
+        return -1;
     }
     
     /**
@@ -311,38 +352,32 @@ public class MusicPlayer {
         }
     }
     
+    /**
+     * 播放下一首。
+     *
+     * 与 playFile 的分工：本方法负责推进 currentPosition，然后调用
+     * playFile 播放。playFile 内部只在【位置不符】时才纠正 currentPosition，
+     * 避免两者互相覆盖导致索引漂移。
+     */
     public void playNext() {
-        if (playlist == null || playlist.isEmpty() || currentPosition == -1) {
-            return;
+        if (playlist == null || playlist.isEmpty()) return;
+        if (currentPosition < 0 || currentPosition >= playlist.size()) {
+            currentPosition = 0;
+        } else {
+            currentPosition = (currentPosition + 1) % playlist.size();
         }
-        
-        int nextPosition = (currentPosition + 1) % playlist.size();
-        if (nextPosition == currentPosition) {
-            return; // 列表��有一个项目
-        }
-        
-        currentPosition = nextPosition;
-        WebDAVFile nextTrack = playlist.get(currentPosition);
-        playFile(nextTrack);
+        playFile(playlist.get(currentPosition));
     }
-    
+
+    /** 播放上一首 */
     public void playPrevious() {
-        if (playlist == null || playlist.isEmpty() || currentPosition == -1) {
-            return;
+        if (playlist == null || playlist.isEmpty()) return;
+        if (currentPosition < 0 || currentPosition >= playlist.size()) {
+            currentPosition = 0;
+        } else {
+            currentPosition = (currentPosition - 1 + playlist.size()) % playlist.size();
         }
-        
-        int prevPosition = currentPosition - 1;
-        if (prevPosition < 0) {
-            prevPosition = playlist.size() - 1;
-        }
-        
-        if (prevPosition == currentPosition) {
-            return; // 列表只有一个项目
-        }
-        
-        currentPosition = prevPosition;
-        WebDAVFile prevTrack = playlist.get(currentPosition);
-        playFile(prevTrack);
+        playFile(playlist.get(currentPosition));
     }
     
     public void seekTo(int position) {

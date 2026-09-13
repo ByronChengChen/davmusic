@@ -220,6 +220,16 @@ public class MainActivity extends AppCompatActivity implements
         updatePlayerUI();
     }
     
+    /**
+     * 加载当前目录。
+     *
+     * 策略：缓存优先 + 后台刷新（stale-while-revalidate）。
+     *   1. 若本地有该目录的快照 → 立即渲染，用户瞬间看到内容
+     *   2. 同时发起网络请求
+     *   3. 新数据回来后覆盖快照、刷新 UI
+     *
+     * 这样进入过的目录不再每次白屏等待网络；离线时也能正常浏览。
+     */
     private void loadCurrentPath() {
         if (!webDAVClient.isConfigured()) {
             // 如果未配置，跳转到配置界面
@@ -227,32 +237,64 @@ public class MainActivity extends AppCompatActivity implements
             finish();
             return;
         }
-        
+
         updateNetworkStatus();
         updatePathDisplay();
-        
-        if (isOfflineMode || !NetworkUtils.isNetworkConnected(this)) {
-            // 离线模式：从快照加载
-            loadFromSnapshot();
-        } else {
-            // 在线模式：从服务器加载
-            loadFromServer();
+
+        // 返回时先清空列表，避免把上一个目录的文件短暂显示成当前目录的内容。
+        // 若下面命中快照会立刻重新填充。
+        fileListAdapter.setFiles(new ArrayList<>());
+
+        final boolean online = !isOfflineMode && NetworkUtils.isNetworkConnected(this);
+
+        // 1) 缓存优先：有快照就立刻渲染
+        boolean rendered = false;
+        List<WebDAVFile> cached = cacheManager.loadSnapshot(currentPath);
+        if (cached != null && !cached.isEmpty()) {
+            updateFileDownloadStates(cached);
+            fileListAdapter.setFiles(cached);
+            fileListAdapter.setOfflineMode(!online);
+            rendered = true;
+            Log.d(TAG, "命中快照，先渲染 " + cached.size() + " 项: " + currentPath);
         }
+
+        // 2) 离线或未联网：只用缓存；没有缓存就提示
+        if (!online) {
+            if (!rendered) {
+                Toast.makeText(this, "没有离线数据可用", Toast.LENGTH_SHORT).show();
+            }
+            swipeRefreshLayout.setRefreshing(false);
+            return;
+        }
+
+        // 3) 在线：后台拉取最新，回来后覆盖缓存并刷新 UI
+        loadFromServer(!rendered);
     }
-    
-    private void loadFromServer() {
-        showLoading("正在加载...");
-        
+
+    /**
+     * 从服务器加载。
+     *
+     * @param showLoading 是否显示加载指示。命中快照时传 false ——
+     *                    已经有内容在显示，不该再盖一层 loading 遮罩。
+     */
+    private void loadFromServer(boolean showLoading) {
+        if (showLoading) {
+            showLoading("正在加载...");
+        }
+
         executorService.execute(() -> {
             webDAVClient.listFolder(currentPath, new WebDAVClient.WebDAVCallback<List<WebDAVFile>>() {
                 @Override
                 public void onSuccess(List<WebDAVFile> files) {
                     // 更新文件的下载状态
                     updateFileDownloadStates(files);
-                    
-                    // 保存快照
-                    cacheManager.saveSnapshot(currentPath, files);
-                    
+
+                    // 只有拿到内容才覆盖快照 —— 避免一次空响应用空列表
+                    // 把之前缓存好的目录数据抹掉
+                    if (files != null && !files.isEmpty()) {
+                        cacheManager.saveSnapshot(currentPath, files);
+                    }
+
                     // 更新 UI
                     mainHandler.post(() -> {
                         dismissLoading();
@@ -261,23 +303,32 @@ public class MainActivity extends AppCompatActivity implements
                         swipeRefreshLayout.setRefreshing(false);
                     });
                 }
-                
+
                 @Override
                 public void onError(Exception e) {
                     Log.e(TAG, "加载失败: " + e.getMessage(), e);
-                    
+
                     mainHandler.post(() -> {
                         dismissLoading();
                         swipeRefreshLayout.setRefreshing(false);
-                        
-                        // 如果在线加载失败，尝试从快照加载
+
+                        // 已经有缓存内容在显示：静默失败即可，不打断浏览
+                        if (fileListAdapter.getItemCount() > 0) {
+                            Toast.makeText(MainActivity.this,
+                                    "刷新失败，显示的是缓存数据", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+
+                        // 没有内容可显示：退回离线快照
                         if (cacheManager.hasSnapshot(currentPath)) {
-                            Toast.makeText(MainActivity.this, "网络连接失败，使用离线数据", Toast.LENGTH_SHORT).show();
+                            Toast.makeText(MainActivity.this,
+                                    "网络连接失败，使用离线数据", Toast.LENGTH_SHORT).show();
                             isOfflineMode = true;
                             updateNetworkStatus();
                             loadFromSnapshot();
                         } else {
-                            Toast.makeText(MainActivity.this, "加载失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                            Toast.makeText(MainActivity.this,
+                                    "加载失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
                         }
                     });
                 }
@@ -345,14 +396,24 @@ public class MainActivity extends AppCompatActivity implements
     
     @Override
     public void onRefresh() {
-        // 下拉刷新
+        // 下拉刷新：用户主动要求最新数据。
+        // 不走 loadCurrentPath() 的"清空 + 快照渲染"流程，
+        // 否则会把已有列表清掉再填回来，出现明显闪烁。
+        // 保持当前列表显示，直接后台拉取。
         if (isOfflineMode) {
             // 离线模式下，尝试重新连接
             isOfflineMode = false;
             updateNetworkStatus();
         }
-        
-        loadCurrentPath();
+
+        if (!NetworkUtils.isNetworkConnected(this)) {
+            swipeRefreshLayout.setRefreshing(false);
+            Toast.makeText(this, "网络未连接", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        boolean hasContent = fileListAdapter.getItemCount() > 0;
+        loadFromServer(!hasContent);
     }
     
     @Override
