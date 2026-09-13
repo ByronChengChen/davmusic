@@ -162,6 +162,9 @@ public class FileListAdapter extends RecyclerView.Adapter<FileListAdapter.ViewHo
 
         if (file.isCollection()) {
             // 文件夹项
+            // 先重置可能从复用中带来的残留状态（例如上一个条目是文件、
+            // 被设过 GONE 或特殊尺寸），保证每次绑定从干净状态开始
+            holder.itemView.setVisibility(View.VISIBLE);
             holder.iconImageView.setImageResource(R.drawable.ic_folder);
             holder.downloadButton.setVisibility(View.GONE);
             holder.deleteButton.setVisibility(View.GONE);
@@ -238,16 +241,22 @@ public class FileListAdapter extends RecyclerView.Adapter<FileListAdapter.ViewHo
                     holder.progressBar.setVisibility(View.GONE);
                     break;
             }
-            
-            // 离线模式下，只显示已下载的文件
-            if (isOfflineMode && file.getDownloadState() != WebDAVFile.DownloadState.DOWNLOADED) {
-                holder.itemView.setVisibility(View.GONE);
-                holder.itemView.setLayoutParams(new RecyclerView.LayoutParams(0, 0));
-            } else {
-                holder.itemView.setVisibility(View.VISIBLE);
-                holder.itemView.setLayoutParams(new RecyclerView.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            }
+
+            // 注意：这里【不再】用 View.GONE + 0×0 LayoutParams 隐藏未下载项。
+            //
+            // 那套做法是早期"离线只显示已下载"设计的遗留，且是严重错误：
+            // RecyclerView 的 ViewHolder 会被复用，一旦某个 holder 被设成
+            // GONE 与 0×0 布局参数，它被复用去渲染别的条目时会带着这些
+            // 残留状态，导致条目时有时无、位置错乱 —— 这正是"滑动时
+            // JAY 有时在第 1 位、有时第 2 位、有时消失"的原因，
+            // 且因为是通用逻辑，其他目录同样错乱。
+            //
+            // 正确的做法：需要隐藏的项应在 setFiles() 阶段就从数据集里
+            // 过滤掉，让适配器只持有真正要显示的条目。当前需求是
+            // "离线也显示完整目录"，所以这里无需任何过滤。
+
+            // 重置可能被复用残留的状态，保证每次绑定都是干净起点
+            holder.itemView.setVisibility(View.VISIBLE);
             
             // 点击事件
             holder.itemView.setOnClickListener(v -> {
