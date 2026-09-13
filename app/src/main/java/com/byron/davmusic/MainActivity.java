@@ -59,6 +59,7 @@ public class MainActivity extends AppCompatActivity implements
     private Handler mainHandler;
     private ProgressDialog progressDialog;
     
+    private RemoteLogger rlog;
     private WebDAVClient webDAVClient;
     private LocalCacheManager cacheManager;
     private MusicPlayer musicPlayer;
@@ -198,6 +199,8 @@ public class MainActivity extends AppCompatActivity implements
         }
 
         // 配置 WebDAV 客户端
+        rlog = RemoteLogger.getInstance(this);
+        rlog.i(TAG, "MainActivity initManagers");
         webDAVClient = WebDAVClient.getInstance();
         webDAVClient.configure(serverUrl, username, password);
         
@@ -965,6 +968,9 @@ public class MainActivity extends AppCompatActivity implements
         } else if (id == R.id.menu_about) {
             showAboutDialog();
             return true;
+        } else if (id == R.id.menu_upload_log) {
+            uploadLogManually();
+            return true;
         }
         
         return super.onOptionsItemSelected(item);
@@ -1022,7 +1028,8 @@ public class MainActivity extends AppCompatActivity implements
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        
+        if (rlog != null) rlog.i(TAG, "<<< onDestroy");
+
         if (executorService != null && !executorService.isShutdown()) {
             executorService.shutdown();
         }
@@ -1031,4 +1038,43 @@ public class MainActivity extends AppCompatActivity implements
             musicPlayer.removePlaybackListener(this);
         }
     }
+
+    /** 手动上报日志（菜单触发），并告知本地路径便于排查 */
+    private void uploadLogManually() {
+        if (rlog == null) {
+            Toast.makeText(this, "日志组件未初始化", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        rlog.i(TAG, "用户手动触发日志上报");
+        rlog.upload("用户手动上报");
+        Toast.makeText(this,
+                "正在上报日志…\n（约几秒后可在服务器查看）",
+                Toast.LENGTH_LONG).show();
+    }
+
+    // ---- 生命周期日志：定位"退后台/锁屏"时刻的行为 ----
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (rlog != null) rlog.i(TAG, ">>> onResume（回到前台）");
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (rlog != null) rlog.i(TAG, "<<< onPause（离开前台）");
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        if (rlog != null) {
+            rlog.i(TAG, "<<< onStop（不可见，锁屏/切后台）");
+            // 到后台时立刻上报一次，确保即便随后被系统杀死也能拿到现场日志
+            rlog.upload("onStop 自动上报");
+        }
+    }
+
 }
+

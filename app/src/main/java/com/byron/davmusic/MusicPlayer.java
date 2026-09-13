@@ -46,6 +46,8 @@ public class MusicPlayer {
     private android.media.MediaPlayer preloadedPlayer;
     
     private List<OnPlaybackListener> listeners = new ArrayList<>();
+    /** 远程日志：只记录，不影响播放逻辑 */
+    private RemoteLogger rlog;
     
     public interface OnPlaybackListener {
         void onTrackChanged(WebDAVFile track);
@@ -57,6 +59,8 @@ public class MusicPlayer {
     private MusicPlayer(Context context) {
         this.context = context.getApplicationContext();
         this.handler = new Handler(Looper.getMainLooper());
+        this.rlog = RemoteLogger.getInstance(this.context);
+        rlog.i(TAG, "MusicPlayer 初始化");
         initWakeLock();
         initAudioFocus();
         initMediaPlayer();
@@ -197,6 +201,7 @@ public class MusicPlayer {
             Log.d(TAG, "MediaPlayer prepared, starting playback");
             mp.start();
             notifyPlayStateChanged(true);
+            logState("onPrepared");
             // 已开始播放，WakeLock 使命完成（MediaPlayer 自身会保持唤醒）
             releaseTransitionWakeLock();
             // 关键：在后台把下一首准备好。
@@ -208,13 +213,19 @@ public class MusicPlayer {
         
         mediaPlayer.setOnCompletionListener(mp -> {
             Log.d(TAG, "Playback completed");
+            logState("onCompletion 触发");
+            rlog.i(TAG, "onCompletion: currentPosition=" + currentPosition
+                    + " playlistSize=" + (playlist == null ? -1 : playlist.size())
+                    + " hasPreloaded=" + (preloadedPlayer != null));
             // 不能在 onCompletion 回调里直接切换曲目：
             // play() 会调用 stop() → MediaPlayer.reset() + 重建实例，
             // 等于在回调内部销毁回调的宿主，时序错乱会导致切歌失败或卡死。
             // 用 handler 把切换动作挪到当前消息循环之外执行。
             handler.post(() -> {
+                rlog.i(TAG, "onCompletion handler 执行 (post 未被延迟丢弃)");
                 if (playlist == null || playlist.size() <= 1) {
                     // 单曲或空列表：播完就停在当前曲目，不循环重播
+                    rlog.i(TAG, "单曲或空列表，停止切歌");
                     notifyPlayStateChanged(false);
                     return;
                 }
@@ -231,6 +242,7 @@ public class MusicPlayer {
             String detail = describeMediaError(what, extra);
             String error = "播放错误: " + detail;
             Log.e(TAG, error + " | url=" + currentUrl);
+            rlog.e(TAG, error + " | url=" + currentUrl);
             // 播放失败：切歌窗口结束，释放临时 WakeLock 防止泄漏
             releaseTransitionWakeLock();
             notifyError(error);
@@ -310,6 +322,7 @@ public class MusicPlayer {
             return;
         }
         currentUrl = url;
+        rlog.i(TAG, "play(): " + displayName + " | url=" + url);
 
         // 切歌窗口内保持 CPU 唤醒：从发起请求到 onPrepared 之间，
         // 锁屏状态下若 CPU 休眠，网络请求与回调都可能被挂起，
@@ -415,8 +428,10 @@ public class MusicPlayer {
             mediaPlayer.setNextMediaPlayer(next);
             preloadedPlayer = next;
             Log.d(TAG, "已预加载下一首: " + nextTrack.getDisplayName());
+            rlog.i(TAG, "预加载成功: " + nextTrack.getDisplayName());
         } catch (Exception e) {
             Log.w(TAG, "预加载下一首失败（不影响当前播放）: " + e.getMessage());
+            rlog.w(TAG, "预加载失败: " + e.getMessage());
             if (next != null) {
                 try { next.release(); } catch (Exception ignored) {}
             }
@@ -452,6 +467,10 @@ public class MusicPlayer {
     
     public void playFile(WebDAVFile file) {
         if (file == null) return;
+        rlog.i(TAG, "playFile: " + file.getDisplayName()
+                + " | pos=" + currentPosition
+                + " | downloaded=" + LocalCacheManager.getInstance(context)
+                        .isDownloaded(file.getHref()));
         
         // 确定播放 URL
         String url;
@@ -516,6 +535,58 @@ public class MusicPlayer {
             if (sameFile(playlist.get(i), file)) return i;
         }
         return -1;
+    }
+
+    /**
+     * 输出完整播放状态快照到远端日志。
+     *
+     * 这是定位"锁屏播完不切歌"的核心手段：需要在事件发生时
+     * 同时看到 MediaPlayer 状态、播放列表状态、预加载状态、
+     * 以及 CPU 唤醒锁的持有情况 —— 缺任何一项都无法区分
+     * "回调没触发" / "回调触发了但切歌被拦下" / "切歌了但播不出来"。
+     */
+    private void logState(String where) {
+        try {
+            StringBuilder sb = new StringBuilder();
+            sb.append("[").append(where).append("] ");
+            sb.append("pos=").append(currentPosition);
+            sb.append("/").append(playlist == null ? -1 : playlist.size());
+
+            if (mediaPlayer != null) {
+                try {
+                    sb.append(" | playing=").append(mediaPlayer.isPlaying());
+                } catch (Exception ex) {
+                    sb.append(" | playing=?(").append(ex.getClass().getSimpleName()).append(")");
+                }
+                try {
+                    sb.append(" | dur=").append(mediaPlayer.getDuration());
+                    sb.append(" | cur=").append(mediaPlayer.getCurrentPosition());
+                } catch (Exception ex) {
+                    sb.append(" | dur/cur=?(illegal state)");
+                }
+            } else {
+                sb.append(" | mp=null");
+            }
+
+            sb.append(" | preparing=").append(isPreparing);
+            sb.append(" | preloaded=").append(preloadedPlayer != null);
+            sb.append(" | wakeLock=")
+              .append(transitionWakeLock != null && transitionWakeLock.isHeld());
+            sb.append(" | focus=").append(hasAudioFocus);
+            sb.append(" | url=").append(currentUrl == null ? "-" : currentUrl);
+
+            String track = "-";
+            if (playlist != null && currentPosition >= 0
+                    && currentPosition < playlist.size()) {
+                track = playlist.get(currentPosition).getDisplayName();
+            }
+            sb.append(" | track=").append(track);
+
+            rlog.i(TAG, sb.toString());
+        } catch (Exception e) {
+            // 诊断代码本身绝不能影响播放
+            rlog.w(TAG, "logState 异常: " + e.getMessage());
+        }
     }
     
     /**
@@ -617,6 +688,8 @@ public class MusicPlayer {
      * 避免两者互相覆盖导致索引漂移。
      */
     public void playNext() {
+        rlog.i(TAG, "playNext 进入: pos=" + currentPosition
+                + " size=" + (playlist == null ? -1 : playlist.size()));
         if (playlist == null || playlist.isEmpty()) return;
         if (currentPosition < 0 || currentPosition >= playlist.size()) {
             currentPosition = 0;
