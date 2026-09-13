@@ -65,7 +65,11 @@ public class MusicService extends Service
      *   这里把 KEYCODE_MEDIA_PREVIOUS / KEYCODE_MEDIA_PREVIOUS 一并注册，
      *   若耳机上报上一首键就能响应。
      */
-    private android.media.session.MediaSession mediaSession;
+    // 使用 MediaSessionCompat（androidx）而不是平台版 MediaSession。
+    // 原因：androidx.media.app.NotificationCompat.MediaStyle 要求的是
+    // MediaSessionCompat.Token，与平台版 Token 类型不兼容；且兼容层会
+    // 统一处理各 Android 版本的行为差异。
+    private androidx.media.session.MediaSessionCompat mediaSession;
 
     @Override
     public void onCreate() {
@@ -161,9 +165,10 @@ public class MusicService extends Service
      */
     private void initMediaSession() {
         try {
-            mediaSession = new android.media.session.MediaSession(this, "DavMusic");
+            mediaSession = new androidx.media.session.MediaSessionCompat(
+                    this, "DavMusic");
 
-            mediaSession.setCallback(new android.media.session.MediaSession.Callback() {
+            mediaSession.setCallback(new androidx.media.session.MediaSessionCompat.Callback() {
 
                 @Override
                 public void onPlay() {
@@ -272,20 +277,21 @@ public class MusicService extends Service
     private void updateMediaSessionState() {
         if (mediaSession == null || player == null) return;
         try {
-            long actions = android.media.session.PlaybackState.ACTION_PLAY
-                    | android.media.session.PlaybackState.ACTION_PAUSE
-                    | android.media.session.PlaybackState.ACTION_PLAY_PAUSE
-                    | android.media.session.PlaybackState.ACTION_STOP
-                    | android.media.session.PlaybackState.ACTION_SKIP_TO_NEXT
-                    | android.media.session.PlaybackState.ACTION_SKIP_TO_PREVIOUS;
+            long actions = android.support.v4.media.session.PlaybackStateCompat.ACTION_PLAY
+                    | android.support.v4.media.session.PlaybackStateCompat.ACTION_PAUSE
+                    | android.support.v4.media.session.PlaybackStateCompat.ACTION_PLAY_PAUSE
+                    | android.support.v4.media.session.PlaybackStateCompat.ACTION_STOP
+                    | android.support.v4.media.session.PlaybackStateCompat.ACTION_SKIP_TO_NEXT
+                    | android.support.v4.media.session.PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS
+                    | android.support.v4.media.session.PlaybackStateCompat.ACTION_SEEK_TO;
 
             boolean playing = player.isPlaying();
             int state = playing
-                    ? android.media.session.PlaybackState.STATE_PLAYING
-                    : android.media.session.PlaybackState.STATE_PAUSED;
+                    ? android.support.v4.media.session.PlaybackStateCompat.STATE_PLAYING
+                    : android.support.v4.media.session.PlaybackStateCompat.STATE_PAUSED;
 
-            android.media.session.PlaybackState.Builder b =
-                    new android.media.session.PlaybackState.Builder()
+            android.support.v4.media.session.PlaybackStateCompat.Builder b =
+                    new android.support.v4.media.session.PlaybackStateCompat.Builder()
                             .setActions(actions)
                             .setState(state, player.getCurrentPosition(), playing ? 1f : 0f);
 
@@ -299,24 +305,24 @@ public class MusicService extends Service
             // 同步当前曲目信息（锁屏/车机/媒体控制中心显示用）
             WebDAVFile cur = player.getCurrentTrack();
             if (cur != null) {
-                android.media.MediaMetadata.Builder mb =
-                        new android.media.MediaMetadata.Builder()
-                                .putString(android.media.MediaMetadata.METADATA_KEY_TITLE,
-                                        cur.getDisplayName())
-                                .putLong(android.media.MediaMetadata.METADATA_KEY_DURATION,
-                                        player.getDuration());
+                android.support.v4.media.MediaMetadataCompat.Builder mb =
+                        new android.support.v4.media.MediaMetadataCompat.Builder()
+                                .putString(android.support.v4.media.MediaMetadataCompat
+                                        .METADATA_KEY_TITLE, cur.getDisplayName())
+                                .putLong(android.support.v4.media.MediaMetadataCompat
+                                        .METADATA_KEY_DURATION, player.getDuration());
 
                 // 从路径推断"艺术家 / 专辑"：WebDAV 上没有标签元数据，
                 // 但音乐通常按 艺术家/专辑/曲目 组织，这里用路径分段填充，
                 // 让媒体控制中心的副标题不再空白。
                 String[] parts = splitPath(cur.getRelativePath());
                 if (parts.length >= 1) {
-                    mb.putString(android.media.MediaMetadata.METADATA_KEY_ARTIST,
-                            parts[parts.length - 1]);
+                    mb.putString(android.support.v4.media.MediaMetadataCompat
+                            .METADATA_KEY_ARTIST, parts[parts.length - 1]);
                 }
                 if (parts.length >= 2) {
-                    mb.putString(android.media.MediaMetadata.METADATA_KEY_ALBUM,
-                            parts[parts.length - 2]);
+                    mb.putString(android.support.v4.media.MediaMetadataCompat
+                            .METADATA_KEY_ALBUM, parts[parts.length - 2]);
                 }
 
                 mediaSession.setMetadata(mb.build());
