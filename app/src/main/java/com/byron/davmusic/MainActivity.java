@@ -260,11 +260,15 @@ public class MainActivity extends AppCompatActivity implements
      * 加载当前目录。
      *
      * 策略：缓存优先 + 后台刷新（stale-while-revalidate）。
-     *   1. 若本地有该目录的快照 → 立即渲染，用户瞬间看到内容
+     *   1. 有本地快照 → 立即渲染，用户瞬间看到内容
      *   2. 同时发起网络请求
      *   3. 新数据回来后覆盖快照、刷新 UI
      *
-     * 这样进入过的目录不再每次白屏等待网络；离线时也能正常浏览。
+     * 离线分支（关键修正）：不再使用"目录快照"，而是列出
+     * 【实际已下载到本地的音频】，按当前路径过滤。原因：
+     * 目录快照记录的是"上次联网时云端有什么"，其中大部分并未下载，
+     * 离线时点开必然播放失败；且从未访问过的目录没有快照，
+     * 表现为"同一文件夹不同时间进去内容还不一样"。
      */
     private void loadCurrentPath() {
         if (!webDAVClient.isConfigured()) {
@@ -274,37 +278,112 @@ public class MainActivity extends AppCompatActivity implements
             return;
         }
 
+        // 网络恢复检测：isOfflineMode 之前是单向开关（只会被置 true），
+        // 导致联网后仍卡在离线模式。这里在每次加载前先根据真实网络状态
+        // 复位 —— 有网络且用户未手动锁定离线，就回到在线模式。
+        refreshOfflineFlag();
+
         updateNetworkStatus();
         updatePathDisplay();
 
         // 返回时先清空列表，避免把上一个目录的文件短暂显示成当前目录的内容。
-        // 若下面命中快照会立刻重新填充。
         fileListAdapter.setFiles(new ArrayList<>());
 
         final boolean online = !isOfflineMode && NetworkUtils.isNetworkConnected(this);
 
-        // 1) 缓存优先：有快照就立刻渲染
+        // 离线：直接列出本地已下载歌曲（不需要云端快照）
+        if (!online) {
+            showLocalDownloads();
+            swipeRefreshLayout.setRefreshing(false);
+            return;
+        }
+
+        // 在线：缓存优先 —— 有快照先渲染，再去网络拉最新
         boolean rendered = false;
         List<WebDAVFile> cached = cacheManager.loadSnapshot(currentPath);
         if (cached != null && !cached.isEmpty()) {
             updateFileDownloadStates(cached);
             fileListAdapter.setFiles(cached);
-            fileListAdapter.setOfflineMode(!online);
+            fileListAdapter.setOfflineMode(false);
             rendered = true;
             Log.d(TAG, "命中快照，先渲染 " + cached.size() + " 项: " + currentPath);
         }
 
-        // 2) 离线或未联网：只用缓存；没有缓存就提示
-        if (!online) {
-            if (!rendered) {
-                Toast.makeText(this, "没有离线数据可用", Toast.LENGTH_SHORT).show();
-            }
-            swipeRefreshLayout.setRefreshing(false);
-            return;
-        }
-
-        // 3) 在线：后台拉取最新，回来后覆盖缓存并刷新 UI
         loadFromServer(!rendered);
+    }
+
+    /**
+     * 根据真实网络状态复位 isOfflineMode。
+     *
+     * 原有缺陷：isOfflineMode 只在加载失败时被置 true，恢复网络后无人复位，
+     * 于是永久停留在离线模式。这里每次加载都重新判断。
+     */
+    private void refreshOfflineFlag() {
+        boolean connected = NetworkUtils.isNetworkConnected(this);
+        if (connected && isOfflineMode) {
+            isOfflineMode = false;
+            if (rlog != null) rlog.i(TAG, "网络已恢复，退出离线模式");
+        } else if (!connected && !isOfflineMode) {
+            isOfflineMode = true;
+            if (rlog != null) rlog.i(TAG, "网络已断开，进入离线模式");
+        }
+    }
+
+    /**
+     * 离线模式：显示【完整目录内容】（与在线时一致），并标注下载状态。
+     *
+     * 数据来源优先级：
+     *   1. 该目录的云端快照 —— 记录完整的目录树与文件列表
+     *   2. 快照缺失时，用本地已下载文件反推目录结构（兜底）
+     *
+     * 这样离线时仍能看到整张歌单：已下载的直接可播，未下载的点了会
+     * 提示需要联网，而不是像之前那样"整个目录都看不到"或"只看到零星
+     * 几个下载过的文件"。
+     */
+    private void showLocalDownloads() {
+        executorService.execute(() -> {
+            // 1) 优先用快照（完整目录）
+            List<WebDAVFile> listed = cacheManager.loadSnapshot(currentPath);
+            boolean fromSnapshot = listed != null && !listed.isEmpty();
+
+            // 2) 快照缺失：用已下载文件反推目录结构
+            List<WebDAVFile> items;
+            if (fromSnapshot) {
+                items = listed;
+            } else {
+                items = cacheManager.listLocalTree(currentPath);
+            }
+
+            // 无论来源如何，都刷新一次下载状态标记
+            if (!items.isEmpty()) {
+                updateFileDownloadStates(items);
+            }
+
+            final boolean useSnapshot = fromSnapshot;
+            final List<WebDAVFile> result = items;
+
+            mainHandler.post(() -> {
+                fileListAdapter.setOfflineMode(true);
+
+                if (result.isEmpty()) {
+                    fileListAdapter.setFiles(new ArrayList<>());
+                    Toast.makeText(this,
+                            "该目录无离线数据\n（联网浏览过的目录会自动缓存列表）",
+                            Toast.LENGTH_LONG).show();
+                } else {
+                    fileListAdapter.setFiles(result);
+                    if (!useSnapshot) {
+                        Toast.makeText(this,
+                                "离线模式（仅本地已下载内容）", Toast.LENGTH_SHORT).show();
+                    } else {
+                        Toast.makeText(this,
+                                "离线模式", Toast.LENGTH_SHORT).show();
+                    }
+                }
+                updatePathDisplay();
+                swipeRefreshLayout.setRefreshing(false);
+            });
+        });
     }
 
     /**
@@ -355,43 +434,24 @@ public class MainActivity extends AppCompatActivity implements
                             return;
                         }
 
-                        // 没有内容可显示：退回离线快照
-                        if (cacheManager.hasSnapshot(currentPath)) {
+                        // 没有内容可显示：退回离线模式，列出本地已下载歌曲
+                        // （不再使用云端目录快照 —— 那些文件多数并未下载，
+                        //   离线点开必然播放失败）
+                        int localCount = cacheManager.getOfflineFileCount();
+                        if (localCount > 0) {
                             Toast.makeText(MainActivity.this,
-                                    "网络连接失败，使用离线数据", Toast.LENGTH_SHORT).show();
+                                    "网络连接失败，切换到离线模式（本地已存 "
+                                            + localCount + " 首）",
+                                    Toast.LENGTH_SHORT).show();
                             isOfflineMode = true;
                             updateNetworkStatus();
-                            loadFromSnapshot();
+                            showLocalDownloads();
                         } else {
                             Toast.makeText(MainActivity.this,
                                     "加载失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
                         }
                     });
                 }
-            });
-        });
-    }
-    
-    private void loadFromSnapshot() {
-        showLoading("正在加载离线数据...");
-        
-        executorService.execute(() -> {
-            List<WebDAVFile> files = cacheManager.loadSnapshot(currentPath);
-            
-            mainHandler.post(() -> {
-                dismissLoading();
-                
-                if (files != null) {
-                    updateFileDownloadStates(files);
-                    fileListAdapter.setFiles(files);
-                    fileListAdapter.setOfflineMode(true);
-                    Toast.makeText(MainActivity.this, "离线模式", Toast.LENGTH_SHORT).show();
-                } else {
-                    Toast.makeText(MainActivity.this, "没有离线数据可用", Toast.LENGTH_SHORT).show();
-                    fileListAdapter.setFiles(new ArrayList<>());
-                }
-                
-                swipeRefreshLayout.setRefreshing(false);
             });
         });
     }
@@ -458,6 +518,14 @@ public class MainActivity extends AppCompatActivity implements
             // 进入文件夹
             navigateToFolder(file);
         } else if (file.isAudio()) {
+            // 离线模式下，未下载的歌曲无法播放 —— 提前给明确提示，
+            // 而不是让 MediaPlayer 抛一个含糊的错误
+            if (isOfflineMode && !cacheManager.isDownloaded(file.getHref())) {
+                Toast.makeText(this,
+                        "离线模式：该歌曲未下载，无法播放\n联网后可播放或先下载",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
             // 播放音频文件
             playAudioFile(file);
         } else {
@@ -578,6 +646,10 @@ public class MainActivity extends AppCompatActivity implements
                         
                         // 标记文件已下载
                         cacheManager.markFileDownloaded(file.getHref(), destFile);
+                        // 同时写入离线索引：离线模式需要按目录列举已下载歌曲，
+                        // 仅靠 downloadMap 无法还原目录结构与显示名
+                        cacheManager.indexOfflineFile(file.getHref(),
+                                file.getDisplayName(), destFile.length());
                         file.setDownloadState(WebDAVFile.DownloadState.DOWNLOADED);
                         file.setLocalPath(destFile.getAbsolutePath());
                         fileListAdapter.updateFile(file);
@@ -1185,6 +1257,17 @@ public class MainActivity extends AppCompatActivity implements
     protected void onResume() {
         super.onResume();
         if (rlog != null) rlog.i(TAG, ">>> onResume（回到前台）");
+
+        // 回到前台时检查网络是否已恢复。
+        // 之前 isOfflineMode 是单向开关，联网后没人复位，导致永远停在
+        // 离线模式；这里在每次回到前台时补一次判断并自动切回在线。
+        boolean wasOffline = isOfflineMode;
+        refreshOfflineFlag();
+        if (wasOffline && !isOfflineMode) {
+            if (rlog != null) rlog.i(TAG, "回到前台检测到网络恢复，重新加载在线数据");
+            Toast.makeText(this, "网络已恢复", Toast.LENGTH_SHORT).show();
+            loadCurrentPath();
+        }
 
         // 与 MusicPlayer 单例同步播放状态。
         // Activity 被系统回收重建后（进程仍存活），播放可能一直在进行 ——
