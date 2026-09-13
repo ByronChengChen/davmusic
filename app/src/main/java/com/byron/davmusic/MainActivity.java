@@ -108,8 +108,20 @@ public class MainActivity extends AppCompatActivity implements
         executorService = Executors.newSingleThreadExecutor();
         mainHandler = new Handler(Looper.getMainLooper());
 
-        // 加载当前路径
+        // 恢复上次的导航位置（Activity 被系统回收后重建时，
+        // 若不恢复会退回根目录，表现为"切回前台回到首页"）
+        boolean restored = restoreNavState(savedInstanceState);
+
+        // 加载当前路径（restored 时 currentPath 已指向上次所在目录）
         loadCurrentPath();
+
+        // 内容渲染完成后再恢复滚动位置
+        restoreScrollPos(savedInstanceState);
+
+        if (rlog != null) {
+            rlog.i(TAG, "onCreate 完成: restored=" + restored
+                    + " path=" + currentPath);
+        }
     }
     
     private void initViews() {
@@ -1030,6 +1042,7 @@ public class MainActivity extends AppCompatActivity implements
         super.onDestroy();
         if (rlog != null) rlog.i(TAG, "<<< onDestroy");
 
+
         if (executorService != null && !executorService.isShutdown()) {
             executorService.shutdown();
         }
@@ -1052,12 +1065,117 @@ public class MainActivity extends AppCompatActivity implements
                 Toast.LENGTH_LONG).show();
     }
 
-    // ---- 生命周期日志：定位"退后台/锁屏"时刻的行为 ----
+    // ---- Activity 状态保存与恢复 ----
+    //
+    // 必要性：MainActivity 在后台可能被系统回收（日志实测：onStop 后 1-2 秒
+    // 就重建，且没有 onDestroy）。进程存活但 Activity 重建时，
+    // currentPath 会退回 "/"，用户看到的就是"切回前台回到首页"。
+    // 把导航状态存进 savedInstanceState 即可原位恢复。
+
+    private static final String STATE_CURRENT_PATH = "state_current_path";
+    private static final String STATE_PATH_STACK = "state_path_stack";
+    private static final String STATE_OFFLINE = "state_offline_mode";
+    private static final String STATE_SCROLL = "state_scroll_pos";
+
+    @Override
+    protected void onSaveInstanceState(@NonNull Bundle outState) {
+        super.onSaveInstanceState(outState);
+        if (rlog != null) rlog.i(TAG, "onSaveInstanceState: path=" + currentPath);
+        outState.putString(STATE_CURRENT_PATH, currentPath);
+        outState.putStringArrayList(STATE_PATH_STACK, new ArrayList<>(pathStack));
+        outState.putBoolean(STATE_OFFLINE, isOfflineMode);
+        if (recyclerView != null && recyclerView.getLayoutManager() != null) {
+            int pos = ((LinearLayoutManager) recyclerView.getLayoutManager())
+                    .findFirstVisibleItemPosition();
+            outState.putInt(STATE_SCROLL, pos);
+        }
+    }
+
+    /** 从 savedInstanceState 恢复导航状态；返回是否恢复了非根路径 */
+    private boolean restoreNavState(Bundle savedInstanceState) {
+        if (savedInstanceState == null) return false;
+
+        String savedPath = savedInstanceState.getString(STATE_CURRENT_PATH, "/");
+        ArrayList<String> savedStack =
+                savedInstanceState.getStringArrayList(STATE_PATH_STACK);
+        boolean savedOffline = savedInstanceState.getBoolean(STATE_OFFLINE, false);
+
+        pathStack.clear();
+        if (savedStack != null) pathStack.addAll(savedStack);
+        isOfflineMode = savedOffline;
+
+        if (savedPath != null && !savedPath.isEmpty() && !"/".equals(savedPath)) {
+            currentPath = savedPath;
+            if (rlog != null) {
+                rlog.i(TAG, "已恢复导航状态: path=" + currentPath
+                        + " stackSize=" + pathStack.size()
+                        + " offline=" + isOfflineMode);
+            }
+            return true;
+        }
+        return false;
+    }
+
+    /** 把内容滚动到上次位置（恢复时调用，避免跳到列表顶部） */
+    private void restoreScrollPos(Bundle savedInstanceState) {
+        if (savedInstanceState == null || recyclerView == null) return;
+        final int pos = savedInstanceState.getInt(STATE_SCROLL, -1);
+        if (pos > 0) {
+            recyclerView.post(() -> {
+                try {
+                    recyclerView.scrollToPosition(pos);
+                } catch (Exception ignored) {
+                }
+            });
+        }
+    }
+
+    @Override
+    protected void onNewIntent(android.content.Intent intent) {
+        super.onNewIntent(intent);
+        // singleTask 模式下复用实例时会走这里，而不是重新 onCreate。
+        // 此时导航状态与播放状态都是现成的，只需重新对齐一次 UI。
+        if (rlog != null) rlog.i(TAG, "onNewIntent（复用已有实例）");
+        syncUiWithPlayer();
+    }
 
     @Override
     protected void onResume() {
         super.onResume();
         if (rlog != null) rlog.i(TAG, ">>> onResume（回到前台）");
+
+        // 与 MusicPlayer 单例同步播放状态。
+        // Activity 被系统回收重建后（进程仍存活），播放可能一直在进行 ——
+        // 此时必须把迷你播放器的标题、按钮、进度条重新对齐到真实状态，
+        // 否则会出现"音乐在响但界面显示未播放"。
+        syncUiWithPlayer();
+    }
+
+    /** 把 UI 状态对齐到 MusicPlayer 单例的真实状态 */
+    private void syncUiWithPlayer() {
+        try {
+            if (musicPlayer == null) return;
+            WebDAVFile current = musicPlayer.getCurrentTrack();
+            if (current != null) {
+                miniPlayerLayout.setVisibility(View.VISIBLE);
+                if (playerTitleTextView != null) {
+                    playerTitleTextView.setText(current.getDisplayName());
+                }
+                if (fileListAdapter != null) {
+                    fileListAdapter.setPlayingHref(current.getHref());
+                }
+            } else {
+                if (miniPlayerLayout != null) {
+                    miniPlayerLayout.setVisibility(View.GONE);
+                }
+                if (fileListAdapter != null) {
+                    fileListAdapter.setPlayingHref(null);
+                }
+            }
+            updatePlayerUI();
+        } catch (Exception e) {
+            if (rlog != null) rlog.w(TAG, "同步播放状态失败: " + e.getMessage());
+        }
     }
 
     @Override

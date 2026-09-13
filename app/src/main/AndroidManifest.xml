@@ -38,10 +38,15 @@
         </activity>
         
         <!-- 主界面：使用 NoActionBar 主题，因为它用 Toolbar 替代 ActionBar。
-             主题若带 ActionBar，setSupportActionBar() 会抛 IllegalStateException -->
+             主题若带 ActionBar，setSupportActionBar() 会抛 IllegalStateException
+
+             launchMode=singleTask：切回前台时复用已有实例并重建到栈顶，
+             避免系统为同一个界面创建多个 Activity 实例（多实例会导致
+             导航栈混乱、返回时路径错位）。 -->
         <activity
             android:name="com.byron.davmusic.MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:theme="@style/Theme.DavMusic.NoActionBar"
             android:screenOrientation="portrait" />
         
