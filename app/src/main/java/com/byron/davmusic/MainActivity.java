@@ -67,11 +67,36 @@ public class MainActivity extends AppCompatActivity implements
     private String currentPath = "/";
     private boolean isOfflineMode = false;
     private boolean isSeeking = false;   // 用户正在拖动进度条时，暂停自动刷新
+
+    // ---- 上传相关 ----
+    /** 系统文件选择器（SAF），可多选；无需存储权限 */
+    private androidx.activity.result.ActivityResultLauncher<String[]> uploadPicker;
+    /** 多选上传的队列，逐个串行上传 */
+    private final java.util.Deque<Uri> uploadQueue = new java.util.ArrayDeque<>();
+    private int uploadTotal = 0;
+    private int uploadDone = 0;
+    /** 上传进度对话框（带百分比，不可取消误触） */
+    private AlertDialog uploadDialog;
+    private TextView uploadProgressText;
+    private android.widget.ProgressBar uploadProgressBar;
     
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        // 注册系统文件选择器（必须在 onCreate 内、onStart 之前完成注册）。
+        // 用 SAF（ACTION_OPEN_DOCUMENT）而不是 READ_EXTERNAL_STORAGE：
+        // 系统代我们读取用户选中的文件，因此无需任何存储权限。
+        uploadPicker = registerForActivityResult(
+                new androidx.activity.result.contract.ActivityResultContracts
+                        .OpenMultipleDocuments(),
+                uris -> {
+                    if (uris == null || uris.isEmpty()) {
+                        return;   // 用户取消
+                    }
+                    startUpload(uris);
+                });
 
         // 无需运行时权限：下载写入的是 App 私有目录（getExternalFilesDir），
         // 上传通过系统文件选择器（SAF）由系统代读，均不需要存储权限。
@@ -543,8 +568,234 @@ public class MainActivity extends AppCompatActivity implements
         }
     }
     
+    /**
+     * 上传入口：弹出选择菜单，然后拉起系统文件选择器。
+     *
+     * 之所以要有这个菜单，是因为 SAF 选择器没法限制"只选音频"，
+     * 而用户从微信/QQ 收到的音乐常常落在 Download 目录里。
+     */
     private void showUploadDialog() {
-        Toast.makeText(this, "上传功能待实现", Toast.LENGTH_SHORT).show();
+        if (isOfflineMode) {
+            Toast.makeText(this, "离线模式下无法上传，请先连接网络", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!webDAVClient.isConfigured()) {
+            Toast.makeText(this, "请先配置 WebDAV 服务器", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("上传到 " + currentPath)
+                .setItems(new CharSequence[]{
+                        "选择文件（可多选）",
+                        "选择音频文件",
+                }, (d, which) -> {
+                    // OpenMultipleDocuments 的 mimeTypes 决定过滤条件
+                    if (which == 0) {
+                        uploadPicker.launch(new String[]{"*/*"});
+                    } else {
+                        uploadPicker.launch(new String[]{"audio/*"});
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /** 开始批量上传（串行，一次一个，避免云盘限流） */
+    private void startUpload(List<Uri> uris) {
+        uploadQueue.clear();
+        uploadQueue.addAll(uris);
+        uploadTotal = uris.size();
+        uploadDone = 0;
+
+        showUploadProgressDialog();
+        uploadNext();
+    }
+
+    /** 取队列中的下一个上传；队列空则收尾 */
+    private void uploadNext() {
+        Uri uri = uploadQueue.poll();
+        if (uri == null) {
+            finishUpload();
+            return;
+        }
+
+        String displayName = queryDisplayName(uri);
+        updateUploadProgress(uploadDone, uploadTotal, displayName);
+
+        executorService.execute(() -> {
+            File tmp = null;
+            try {
+                // 1) 把 content:// 拷到应用私有缓存，OkHttp 需要一个真实文件
+                tmp = copyUriToCache(uri, displayName);
+                if (tmp == null || !tmp.exists() || tmp.length() == 0) {
+                    throw new java.io.IOException("读取所选文件失败");
+                }
+
+                // 2) 目标远端路径（当前目录 + 文件名）
+                String remotePath = joinPath(currentPath, displayName);
+
+                // 3) 上传（回调已在主线程）
+                final File toUpload = tmp;
+                final java.util.concurrent.CountDownLatch latch =
+                        new java.util.concurrent.CountDownLatch(1);
+                final Exception[] err = new Exception[1];
+
+                webDAVClient.upload(toUpload, remotePath,
+                        new WebDAVClient.ProgressCallback() {
+                            @Override
+                            public void onProgress(int progress) {
+                                updateUploadPercent(progress, displayName);
+                            }
+
+                            @Override
+                            public void onSuccess(Object result) {
+                                err[0] = null;
+                                latch.countDown();
+                            }
+
+                            @Override
+                            public void onError(Exception e) {
+                                err[0] = e;
+                                latch.countDown();
+                            }
+                        });
+
+                // 等本次上传结束再处理下一个（串行，避免占用过多云盘配额）
+                latch.await(10, java.util.concurrent.TimeUnit.MINUTES);
+
+                if (err[0] != null) {
+                    throw err[0];
+                }
+
+                mainHandler.post(() -> {
+                    uploadDone++;
+                    updateUploadProgress(uploadDone, uploadTotal, displayName);
+                });
+
+            } catch (Exception e) {
+                Log.e(TAG, "上传失败: " + displayName, e);
+                final String msg = e.getMessage() == null ? e.toString() : e.getMessage();
+                mainHandler.post(() -> Toast.makeText(MainActivity.this,
+                        "上传失败: " + displayName + "\n" + msg,
+                        Toast.LENGTH_LONG).show());
+            } finally {
+                if (tmp != null) {
+                    //noinspection ResultOfMethodCallIgnored
+                    tmp.delete();
+                }
+                mainHandler.post(this::uploadNext);
+            }
+        });
+    }
+
+    private void finishUpload() {
+        dismissUploadProgressDialog();
+        Toast.makeText(this, "上传完成（" + uploadDone + "/" + uploadTotal + "）",
+                Toast.LENGTH_SHORT).show();
+        // 刷新列表，让新文件立刻出现
+        loadCurrentPath();
+    }
+
+    // ---- 上传进度对话框 ----
+
+    private void showUploadProgressDialog() {
+        View v = getLayoutInflater().inflate(R.layout.dialog_upload_progress, null);
+        uploadProgressText = v.findViewById(R.id.uploadProgressText);
+        uploadProgressBar = v.findViewById(R.id.uploadProgressBar);
+
+        uploadDialog = new AlertDialog.Builder(this)
+                .setTitle("正在上传")
+                .setView(v)
+                .setCancelable(false)
+                .setNegativeButton("取消", (d, w) -> {
+                    uploadQueue.clear();
+                    dismissUploadProgressDialog();
+                    Toast.makeText(this, "已取消剩余上传", Toast.LENGTH_SHORT).show();
+                })
+                .create();
+        uploadDialog.show();
+    }
+
+    private void updateUploadProgress(int done, int total, String currentName) {
+        if (uploadProgressText == null) return;
+        uploadProgressText.setText(String.format(
+                java.util.Locale.getDefault(),
+                "%d / %d\n%s", done + 1, total, currentName));
+        if (uploadProgressBar != null) {
+            uploadProgressBar.setMax(total);
+            uploadProgressBar.setProgress(done);
+        }
+    }
+
+    private void updateUploadPercent(int percent, String name) {
+        if (uploadProgressText == null) return;
+        uploadProgressText.setText(String.format(
+                java.util.Locale.getDefault(),
+                "%d / %d  (%d%%)\n%s",
+                uploadDone + 1, uploadTotal, percent, name));
+    }
+
+    private void dismissUploadProgressDialog() {
+        if (uploadDialog != null && uploadDialog.isShowing()) {
+            uploadDialog.dismiss();
+        }
+        uploadDialog = null;
+        uploadProgressText = null;
+        uploadProgressBar = null;
+    }
+
+    // ---- SAF 辅助 ----
+
+    /** 从 content:// URI 取显示名（含扩展名）；失败时回退为时间戳 */
+    private String queryDisplayName(Uri uri) {
+        String name = null;
+        try (android.database.Cursor c = getContentResolver().query(
+                uri, null, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                int idx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME);
+                if (idx >= 0) {
+                    name = c.getString(idx);
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "查询文件名失败: " + e.getMessage());
+        }
+        if (name == null || name.trim().isEmpty()) {
+            name = "upload_" + System.currentTimeMillis();
+        }
+        // 去掉路径分隔符，避免构造出越界的远端路径
+        return name.replace("/", "_").replace("\\", "_").trim();
+    }
+
+    /** 把 content:// 内容复制到应用私有缓存目录，返回临时文件 */
+    private File copyUriToCache(Uri uri, String displayName) {
+        File dir = new File(getCacheDir(), "upload");
+        if (!dir.exists() && !dir.mkdirs()) {
+            return null;
+        }
+        File out = new File(dir, displayName);
+        try (java.io.InputStream in = getContentResolver().openInputStream(uri);
+             java.io.OutputStream os = new java.io.FileOutputStream(out)) {
+            if (in == null) return null;
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) != -1) {
+                os.write(buf, 0, n);
+            }
+            return out;
+        } catch (Exception e) {
+            Log.e(TAG, "复制所选文件失败: " + e.getMessage(), e);
+            return null;
+        }
+    }
+
+    /** 拼接远端路径，保证单个分隔符且规范化 */
+    private String joinPath(String dir, String name) {
+        String d = dir == null || dir.isEmpty() ? "/" : dir;
+        if (!d.startsWith("/")) d = "/" + d;
+        if (!d.endsWith("/")) d = d + "/";
+        return d + name;
     }
     
     private void togglePlayPause() {

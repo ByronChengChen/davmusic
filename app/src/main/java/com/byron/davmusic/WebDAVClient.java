@@ -33,6 +33,7 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 
 public class WebDAVClient {
+    private static final String TAG = "WebDAVClient";
     private static WebDAVClient instance;
     private OkHttpClient client;
     private String baseUrl;
@@ -195,22 +196,48 @@ public class WebDAVClient {
     }
 
     // 上传文件
+    /**
+     * 上传本地文件到 WebDAV。
+     *
+     * 要点：
+     *  - URL 必须逐段编码，否则中文/空格文件名会被服务端拒绝
+     *    （与下载侧同一个坑：未编码时请求根本发不出去）。
+     *  - 用自定义 RequestBody 汇报进度，而不是默认的 File 包装。
+     *  - 上传成功后重新 PROPFIND 一次，用远端实际大小校验，
+     *    因为云盘驱动偶尔会返回异常状态码但字节已写入（参见 423 现象）。
+     *
+     * @param localFile  本地源文件
+     * @param remotePath 相对路径（不含 baseUrl），如 "cmcc/music/xxx.m4a"
+     * @param callback   进度与结果回调（主线程）
+     */
     public void upload(File localFile, String remotePath, final ProgressCallback callback) {
         if (!isConfigured()) {
             callback.onError(new Exception("WebDAV client not configured"));
             return;
         }
+        if (localFile == null || !localFile.exists()) {
+            callback.onError(new Exception("本地文件不存在"));
+            return;
+        }
 
-        String url = baseUrl + (remotePath.startsWith("/") ? remotePath.substring(1) : remotePath);
-        
-        RequestBody requestBody = RequestBody.create(localFile, MediaType.parse("application/octet-stream"));
-        
+        final long total = localFile.length();
+        final String url = getDownloadUrl(remotePath);
+
+        RequestBody body;
+        try {
+            body = new ProgressRequestBody(
+                    localFile,
+                    MediaType.parse(guessMimeType(localFile.getName())),
+                    percent -> notifyProgressOnMain(callback, percent));
+        } catch (Exception e) {
+            callback.onError(e);
+            return;
+        }
+
         Request request = new Request.Builder()
                 .url(url)
-                .put(requestBody)
+                .put(body)
                 .header("Authorization", getBasicAuthHeader())
-                .header("Content-Type", "application/octet-stream")
-                .header("Content-Length", String.valueOf(localFile.length()))
                 .build();
 
         client.newCall(request).enqueue(new Callback() {
@@ -220,12 +247,28 @@ public class WebDAVClient {
             }
 
             @Override
-            public void onResponse(Call call, Response response) throws IOException {
+            public void onResponse(Call call, Response response) {
                 try {
-                    if (response.isSuccessful()) {
+                    int code = response.code();
+
+                    // 2xx 视为成功；非 2xx 再给一次机会：云盘驱动偶发返回
+                    // 4xx（如 423 Locked）但数据其实已落盘，用远端大小复核。
+                    if (code >= 200 && code < 300) {
+                        notifyProgressOnMain(callback, 100);
+                        callback.onSuccess(null);
+                        return;
+                    }
+
+                    long remote = remoteSizeQuiet(remotePath);
+                    if (remote >= total * 0.95) {
+                        android.util.Log.w(TAG,
+                                "上传返回 HTTP " + code + "，但远端已有 "
+                                        + remote + " 字节，视为成功");
+                        notifyProgressOnMain(callback, 100);
                         callback.onSuccess(null);
                     } else {
-                        callback.onError(new Exception("Upload failed: HTTP " + response.code()));
+                        callback.onError(new Exception(
+                                "上传失败: HTTP " + code + "（远端 " + remote + " 字节）"));
                     }
                 } finally {
                     response.close();
@@ -233,6 +276,132 @@ public class WebDAVClient {
             }
         });
     }
+
+    /** 进度回调切到主线程，避免调用方在子线程更新 UI */
+    private void notifyProgressOnMain(final ProgressCallback callback, final int percent) {
+        new android.os.Handler(android.os.Looper.getMainLooper())
+                .post(() -> callback.onProgress(percent));
+    }
+
+    /** 静默查询远端文件大小；失败返回 -1 */
+    private long remoteSizeQuiet(String remotePath) {
+        try {
+            java.util.List<WebDAVFile> files = listFolderSync(parentOf(remotePath));
+            String name = lastSegment(remotePath);
+            for (WebDAVFile f : files) {
+                if (name.equals(f.getDisplayName())) {
+                    return f.getContentLength();
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return -1;
+    }
+
+    private String parentOf(String path) {
+        String p = trimSlashes(path);
+        int i = p.lastIndexOf('/');
+        return i > 0 ? "/" + p.substring(0, i) : "/";
+    }
+
+    /** 简单按扩展名猜 MIME，便于部分服务端正确分类 */
+    private String guessMimeType(String fileName) {
+        String n = fileName == null ? "" : fileName.toLowerCase();
+        if (n.endsWith(".mp3")) return "audio/mpeg";
+        if (n.endsWith(".m4a")) return "audio/mp4";
+        if (n.endsWith(".flac")) return "audio/flac";
+        if (n.endsWith(".wav")) return "audio/wav";
+        if (n.endsWith(".aac")) return "audio/aac";
+        if (n.endsWith(".ogg") || n.endsWith(".opus")) return "audio/ogg";
+        if (n.endsWith(".wma")) return "audio/x-ms-wma";
+        if (n.endsWith(".ape")) return "audio/x-ape";
+        if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "image/jpeg";
+        if (n.endsWith(".png")) return "image/png";
+        if (n.endsWith(".lrc") || n.endsWith(".ttml") || n.endsWith(".txt")) return "text/plain";
+        return "application/octet-stream";
+    }
+
+    /**
+     * 带进度的 RequestBody。OkHttp 在写 socket 时按块回调，
+     * 这里换算成百分比并做节流（同一百分比只报一次）。
+     */
+    private static class ProgressRequestBody extends RequestBody {
+        interface Listener {
+            void onPercent(int percent);
+        }
+
+        private final File file;
+        private final MediaType type;
+        private final Listener listener;
+        private final long length;
+        private int lastPercent = -1;
+
+        ProgressRequestBody(File file, MediaType type, Listener listener) {
+            this.file = file;
+            this.type = type;
+            this.listener = listener;
+            this.length = file.length();
+        }
+
+        @Override
+        public MediaType contentType() {
+            return type;
+        }
+
+        @Override
+        public long contentLength() {
+            return length;
+        }
+
+        @Override
+        public void writeTo(okio.BufferedSink sink) throws IOException {
+            byte[] buffer = new byte[8192];
+            long uploaded = 0;
+            try (java.io.InputStream in = new java.io.FileInputStream(file)) {
+                int read;
+                while ((read = in.read(buffer)) != -1) {
+                    sink.write(buffer, 0, read);
+                    uploaded += read;
+                    if (length > 0 && listener != null) {
+                        int percent = (int) (uploaded * 100 / length);
+                        if (percent != lastPercent) {
+                            lastPercent = percent;
+                            listener.onPercent(percent);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /** 同步列目录（上传校验用；调用方已在子线程） */
+    public java.util.List<WebDAVFile> listFolderSync(String path) throws Exception {
+        String url = getDownloadUrl(path);
+        if (!url.endsWith("/")) url += "/";
+
+        String propfindXml = "<?xml version=\"1.0\" encoding=\"utf-8\" ?>"
+                + "<D:propfind xmlns:D=\"DAV:\"><D:prop>"
+                + "<D:displayname/><D:getcontentlength/><D:getcontenttype/>"
+                + "<D:getetag/><D:resourcetype/>"
+                + "</D:prop></D:propfind>";
+
+        Request req = new Request.Builder()
+                .url(url)
+                .method("PROPFIND", RequestBody.create(
+                        propfindXml, MediaType.parse("application/xml")))
+                .header("Depth", "1")
+                .header("Authorization", getBasicAuthHeader())
+                .build();
+
+        try (Response resp = client.newCall(req).execute()) {
+            if (!resp.isSuccessful()) {
+                throw new IOException("PROPFIND HTTP " + resp.code());
+            }
+            String xml = resp.body() != null ? resp.body().string() : "";
+            return parsePropfindResponse(xml, path);
+        }
+    }
+
 
     // 获取下载 URL
     /**

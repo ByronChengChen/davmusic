@@ -65,6 +65,10 @@ dependencies {
     // RecyclerView 列表
     implementation 'androidx.recyclerview:recyclerview:1.3.2'
 
+    // 上传用的 SAF 文件选择器（registerForActivityResult）
+    // appcompat 会传递引入 activity，但显式声明可避免 CI 上解析失败
+    implementation 'androidx.activity:activity:1.9.3'
+
     // 网络库 - WebDAV 通信 (PROPFIND/GET/PUT)
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 
