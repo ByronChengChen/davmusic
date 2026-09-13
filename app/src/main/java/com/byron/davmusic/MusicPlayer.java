@@ -26,6 +26,24 @@ public class MusicPlayer {
     private boolean isPreparing = false;
     private Map<String, String> authHeaders;
     private String currentUrl;     // 当前播放的 URL，便于错误诊断
+
+    // ---- 后台播放支持 ----
+    /**
+     * 切歌期间持有的 WakeLock。
+     *
+     * 为什么需要：在线播放时切下一首要发新的 HTTP 请求。锁屏后 CPU 可能
+     * 进入休眠，而 MediaPlayer 的 onCompletion 回调依赖主线程消息队列，
+     * 网络请求又依赖 CPU 唤醒 —— 两者都可能被延迟到用户解锁后才发生，
+     * 表现为"锁屏播完一首后不自动播下一首"。
+     * 在切换曲目的窗口内短暂持有 PARTIAL_WAKE_LOCK 即可解决。
+     */
+    private android.os.PowerManager.WakeLock transitionWakeLock;
+    /** 音频焦点：播放时申请，失去时暂停（来电/其他 App 抢占） */
+    private android.media.AudioManager audioManager;
+    private android.media.AudioManager.OnAudioFocusChangeListener audioFocusListener;
+    private boolean hasAudioFocus = false;
+    /** 预加载的下一首 MediaPlayer（由 setNextMediaPlayer 接管，需跟踪以避免泄漏） */
+    private android.media.MediaPlayer preloadedPlayer;
     
     private List<OnPlaybackListener> listeners = new ArrayList<>();
     
@@ -39,7 +57,107 @@ public class MusicPlayer {
     private MusicPlayer(Context context) {
         this.context = context.getApplicationContext();
         this.handler = new Handler(Looper.getMainLooper());
+        initWakeLock();
+        initAudioFocus();
         initMediaPlayer();
+    }
+
+    /**
+     * 初始化切歌用的 WakeLock。
+     * PARTIAL_WAKE_LOCK 只保持 CPU 运行、不点亮屏幕，是后台音频场景的标准做法。
+     */
+    private void initWakeLock() {
+        try {
+            android.os.PowerManager pm = (android.os.PowerManager)
+                    context.getSystemService(Context.POWER_SERVICE);
+            if (pm != null) {
+                transitionWakeLock = pm.newWakeLock(
+                        android.os.PowerManager.PARTIAL_WAKE_LOCK,
+                        "davmusic:track-transition");
+                // 引用计数由我们手动管理，避免超时后锁状态与预期不符
+                transitionWakeLock.setReferenceCounted(false);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "WakeLock 初始化失败: " + e.getMessage());
+        }
+    }
+
+    /** 短暂持有 WakeLock（最多 3 分钟，防泄漏） */
+    private void acquireTransitionWakeLock() {
+        try {
+            if (transitionWakeLock != null && !transitionWakeLock.isHeld()) {
+                transitionWakeLock.acquire(3 * 60 * 1000L);
+                Log.d(TAG, "已获取 WakeLock（后台切歌）");
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "获取 WakeLock 失败: " + e.getMessage());
+        }
+    }
+
+    /** 释放 WakeLock */
+    private void releaseTransitionWakeLock() {
+        try {
+            if (transitionWakeLock != null && transitionWakeLock.isHeld()) {
+                transitionWakeLock.release();
+                Log.d(TAG, "已释放 WakeLock");
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "释放 WakeLock 失败: " + e.getMessage());
+        }
+    }
+
+    /** 初始化音频焦点监听 */
+    private void initAudioFocus() {
+        audioManager = (android.media.AudioManager)
+                context.getSystemService(Context.AUDIO_SERVICE);
+        audioFocusListener = focusChange -> {
+            switch (focusChange) {
+                case android.media.AudioManager.AUDIOFOCUS_LOSS:
+                    // 永久失去（其他 App 开始播放）：暂停
+                    hasAudioFocus = false;
+                    pause();
+                    break;
+                case android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
+                    // 暂时失去（来电）：暂停，之后用户手动恢复
+                    pause();
+                    break;
+                case android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
+                    // 可以降低音量（导航播报）：这里简单处理为保持播放
+                    break;
+                case android.media.AudioManager.AUDIOFOCUS_GAIN:
+                    hasAudioFocus = true;
+                    break;
+                default:
+                    break;
+            }
+        };
+    }
+
+    /** 申请音频焦点；成功返回 true */
+    private boolean requestAudioFocus() {
+        if (audioManager == null || audioFocusListener == null) return true;
+        try {
+            int r = audioManager.requestAudioFocus(
+                    audioFocusListener,
+                    android.media.AudioManager.STREAM_MUSIC,
+                    android.media.AudioManager.AUDIOFOCUS_GAIN);
+            hasAudioFocus = (r == android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED);
+            return hasAudioFocus;
+        } catch (Exception e) {
+            Log.w(TAG, "申请音频焦点失败: " + e.getMessage());
+            return true;   // 失败不阻塞播放
+        }
+    }
+
+    /** 释放音频焦点 */
+    private void abandonAudioFocus() {
+        if (audioManager != null && audioFocusListener != null) {
+            try {
+                audioManager.abandonAudioFocus(audioFocusListener);
+            } catch (Exception ignored) {
+            }
+        }
+        hasAudioFocus = false;
     }
     
     public static synchronized MusicPlayer getInstance(Context context) {
@@ -55,11 +173,37 @@ public class MusicPlayer {
         }
         
         mediaPlayer = new MediaPlayer();
+
+        // 让 MediaPlayer 自己做 CPU 唤醒管理（内部持有 MediaPlayer 级别的
+        // WakeLock），配合下面的 transitionWakeLock 覆盖切歌窗口。
+        try {
+            mediaPlayer.setWakeMode(context, android.os.PowerManager.PARTIAL_WAKE_LOCK);
+        } catch (Exception e) {
+            Log.w(TAG, "setWakeMode 失败: " + e.getMessage());
+        }
+
+        // 声明音频用途，系统据此做音量/焦点决策
+        try {
+            mediaPlayer.setAudioAttributes(new android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build());
+        } catch (Exception e) {
+            Log.w(TAG, "setAudioAttributes 失败: " + e.getMessage());
+        }
+
         mediaPlayer.setOnPreparedListener(mp -> {
             isPreparing = false;
             Log.d(TAG, "MediaPlayer prepared, starting playback");
             mp.start();
             notifyPlayStateChanged(true);
+            // 已开始播放，WakeLock 使命完成（MediaPlayer 自身会保持唤醒）
+            releaseTransitionWakeLock();
+            // 关键：在后台把下一首准备好。
+            // 这样播完时由 MediaPlayer 在 native 层直接接续，
+            // 不依赖主线程被调度，也不需要在切歌瞬间发网络请求 ——
+            // 这正是锁屏后"播完一首就不动了"的解法。
+            prepareNextTrack();
         });
         
         mediaPlayer.setOnCompletionListener(mp -> {
@@ -74,6 +218,10 @@ public class MusicPlayer {
                     notifyPlayStateChanged(false);
                     return;
                 }
+                // 走正常切歌流程：推进索引 → playFile → play()。
+                // 即使 MediaPlayer 原生已预加载下一首，这里仍重新走一遍，
+                // 因为它同时负责更新 currentPosition、通知 UI、以及
+                // 为"新的下一首"再次预加载 —— 保持状态单一可信。
                 playNext();
             });
         });
@@ -83,6 +231,8 @@ public class MusicPlayer {
             String detail = describeMediaError(what, extra);
             String error = "播放错误: " + detail;
             Log.e(TAG, error + " | url=" + currentUrl);
+            // 播放失败：切歌窗口结束，释放临时 WakeLock 防止泄漏
+            releaseTransitionWakeLock();
             notifyError(error);
             return true;
         });
@@ -160,7 +310,17 @@ public class MusicPlayer {
             return;
         }
         currentUrl = url;
-        
+
+        // 切歌窗口内保持 CPU 唤醒：从发起请求到 onPrepared 之间，
+        // 锁屏状态下若 CPU 休眠，网络请求与回调都可能被挂起，
+        // 表现为"锁屏播完一首后不自动播下一首"。
+        acquireTransitionWakeLock();
+
+        // 申请音频焦点（来电/其他播放器场景下由系统协调）
+        if (!hasAudioFocus) {
+            requestAudioFocus();
+        }
+
         stop();
         
         try {
@@ -170,6 +330,7 @@ public class MusicPlayer {
                 // 本地文件播放
                 File file = new File(url.startsWith("file://") ? url.substring(7) : url);
                 if (!file.exists()) {
+                    releaseTransitionWakeLock();
                     notifyError("本地文件不存在: " + url);
                     return;
                 }
@@ -193,9 +354,90 @@ public class MusicPlayer {
             
         } catch (IOException e) {
             isPreparing = false;
+            releaseTransitionWakeLock();
             Log.e(TAG, "播放失败: " + e.getMessage(), e);
             notifyError("播放失败: " + e.getMessage());
         }
+    }
+
+    // ---- 预加载下一首（后台无缝切歌的关键） ----
+
+    /**
+     * 预加载下一首到 MediaPlayer 的 "next" 槽位。
+     *
+     * 为什么这是后台切歌的关键：
+     *   仅靠 onCompletion + handler 切歌，在锁屏状态下依赖"回调能准时执行"
+     *   和"切歌时能立刻发网络请求"两件事同时成立，任何一件被系统延迟，
+     *   用户看到的就是"播完不动了"。
+     *   setNextMediaPlayer() 把准备动作提前到【当前曲目还在播放时】完成，
+     *   播完由 MediaPlayer 在 native 层直接切换到已缓冲好的流 ——
+     *   不依赖 App 主线程被调度，也不需要切歌瞬间的网络请求。
+     *
+     * 注意：setNextMediaPlayer 要求两个 MediaPlayer 的音频属性一致，
+     * 因此这里复用同一套 AudioAttributes（已在 initMediaPlayer 设置）。
+     */
+    private void prepareNextTrack() {
+        if (mediaPlayer == null) return;
+        if (playlist == null || playlist.size() <= 1) return;
+        if (currentPosition < 0 || currentPosition >= playlist.size()) return;
+
+        int nextPos = (currentPosition + 1) % playlist.size();
+        WebDAVFile nextTrack = playlist.get(nextPos);
+        if (nextTrack == null) return;
+
+        String url = resolvePlayUrl(nextTrack);
+        if (url == null || url.isEmpty()) return;
+
+        android.media.MediaPlayer next = null;
+        try {
+            next = new android.media.MediaPlayer();
+            next.setAudioAttributes(new android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build());
+            next.setWakeMode(context, android.os.PowerManager.PARTIAL_WAKE_LOCK);
+
+            if (url.startsWith("file://") || url.startsWith("/")) {
+                File f = new File(url.startsWith("file://") ? url.substring(7) : url);
+                if (!f.exists()) return;
+                next.setDataSource(f.getAbsolutePath());
+            } else {
+                Uri uri = Uri.parse(url);
+                if (authHeaders != null && !authHeaders.isEmpty()) {
+                    Map<String, String> headers = new HashMap<>();
+                    headers.put("Authorization", authHeaders.get("Authorization"));
+                    next.setDataSource(context, uri, headers);
+                } else {
+                    next.setDataSource(context, uri);
+                }
+            }
+
+            mediaPlayer.setNextMediaPlayer(next);
+            preloadedPlayer = next;
+            Log.d(TAG, "已预加载下一首: " + nextTrack.getDisplayName());
+        } catch (Exception e) {
+            Log.w(TAG, "预加载下一首失败（不影响当前播放）: " + e.getMessage());
+            if (next != null) {
+                try { next.release(); } catch (Exception ignored) {}
+            }
+            preloadedPlayer = null;
+        }
+    }
+
+    /**
+     * 解析某曲目的实际播放地址：已下载用本地文件，否则用远端 URL。
+     * 与 playFile 中的判定逻辑保持一致。
+     */
+    private String resolvePlayUrl(WebDAVFile file) {
+        if (file == null) return null;
+        LocalCacheManager cm = LocalCacheManager.getInstance(context);
+        if (cm.isDownloaded(file.getHref())) {
+            File local = cm.getLocalFile(file.getHref());
+            if (local != null && local.exists()) {
+                return "file://" + local.getAbsolutePath();
+            }
+        }
+        return WebDAVClient.getInstance().getDownloadUrl(file);
     }
     
     public void setPlaylist(List<WebDAVFile> playlist, int startIndex) {
@@ -350,6 +592,21 @@ public class MusicPlayer {
             initMediaPlayer(); // 重新初始化 MediaPlayer
             notifyPlayStateChanged(false);
         }
+        // 释放预加载的下一首，避免重建 MediaPlayer 后旧实例残留。
+        // setNextMediaPlayer 的接收方由当前 mediaPlayer 持有，
+        // reset() 后不再引用，必须手动 release。
+        releasePreloadedPlayer();
+    }
+
+    /** 释放预加载实例（幂等） */
+    private void releasePreloadedPlayer() {
+        if (preloadedPlayer != null) {
+            try {
+                preloadedPlayer.release();
+            } catch (Exception ignored) {
+            }
+            preloadedPlayer = null;
+        }
     }
     
     /**
@@ -453,6 +710,9 @@ public class MusicPlayer {
     }
     
     public void release() {
+        releaseTransitionWakeLock();
+        abandonAudioFocus();
+
         if (handler != null) {
             handler.removeCallbacks(progressUpdater);
         }

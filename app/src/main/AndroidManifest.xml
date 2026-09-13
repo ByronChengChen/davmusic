@@ -8,6 +8,11 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- 后台播放：锁屏后 CPU 可能休眠，导致播完一首无法自动切下一首。
+         MediaPlayer.setWakeMode() 与切歌窗口的 PARTIAL_WAKE_LOCK 需要此权限。
+         属于 normal 级权限，无需运行时申请。 -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
