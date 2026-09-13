@@ -132,65 +132,12 @@ public class MainActivity extends AppCompatActivity implements
         if (rlog != null) rlog.i(TAG, "[内存缓存] 失效 " + path);
     }
 
-    // ---- 请求退避（防限流自锁） ----
-    //
-    // 设计目标：服务端开始限流时快速收手，但【恢复要快】。
-    //
-    // 关键取舍：退避时间【封顶且不累积】。
-    // 反例是常见的指数退避（3s→6s→12s→24s→48s…）—— 一旦被限流，
-    // 退避会越拖越长，而服务端的封禁往往早已解除，用户却还在干等，
-    // 表现为"失败之后好久都恢复不了"。
-    //
-    // 这里改为：
-    //   · 连续失败 2 次触发退避，固定 15 秒
-    //   · 再失败仍是 15 秒（不倍增，不累积）
-    //   · 退避到期后放行一次请求"探路"：成功即完全恢复；失败则再等 15 秒
-    // 最坏情况下 15 秒内必定恢复，不会出现越来越长的等待。
-    private static final int FAIL_THRESHOLD = 2;
-    private static final long BACKOFF_MS = 15 * 1000L;   // 固定 15 秒，封顶
-
-    private int consecutiveFailures = 0;
-    private long backoffUntil = 0L;
-
-    /** 记录一次普通请求失败 */
-    private void noteRequestFailure() {
-        consecutiveFailures++;
-        if (consecutiveFailures >= FAIL_THRESHOLD) {
-            enterBackoff("网络请求连续失败");
-        }
-    }
-
-    /** 请求成功：清零失败计数并解除退避 */
-    private void noteRequestSuccess() {
-        if (consecutiveFailures != 0 || backoffUntil != 0) {
-            if (rlog != null) rlog.i(TAG, "请求成功，清除失败计数与退避");
-        }
-        consecutiveFailures = 0;
-        backoffUntil = 0L;
-    }
-
-    /** 进入退避窗口（若已在窗口中则顺延一个固定周期，不倍增） */
-    private void enterBackoff(String reason) {
-        backoffUntil = System.currentTimeMillis() + BACKOFF_MS;
-        if (rlog != null) {
-            rlog.w(TAG, "进入退避 " + (BACKOFF_MS / 1000) + " 秒（" + reason
-                    + "，连续失败 " + consecutiveFailures + " 次）");
-        }
-    }
-
-    /** 当前是否处于退避窗口 */
-    private boolean isInBackoff() {
-        return System.currentTimeMillis() < backoffUntil;
-    }
-
-    /** 判断异常是否代表服务端限流 */
+    /** 判断异常是否代表服务端限流（429），用于给用户明确提示 */
     private boolean isRateLimitError(Exception e) {
         if (e == null) return false;
         String msg = e.getMessage();
         if (msg == null) return false;
         String s = msg.toLowerCase();
-        // WebDAVClient 在非 2xx 时会把状态码写进消息；429 与
-        // "too many" 都按限流处理
         return s.contains("429") || s.contains("too many") || s.contains("rate");
     }
 
@@ -589,30 +536,6 @@ public class MainActivity extends AppCompatActivity implements
      * @param requestPath 发起时的路径；与 token 一起用于丢弃过期结果
      */
     private void loadFromServer(boolean showLoading, final int token, final String requestPath) {
-        // 退避窗口内不发请求。
-        // 注意：仅在"没有内容可显示"时才提示用户，避免打断已有内容的浏览。
-        if (isInBackoff()) {
-            long left = Math.max(0, (backoffUntil - System.currentTimeMillis()) / 1000);
-            if (rlog != null) {
-                rlog.w(TAG, "处于退避窗口，暂不请求（剩余 " + left + " 秒）: " + requestPath);
-            }
-            dismissLoading();
-            swipeRefreshLayout.setRefreshing(false);
-            if (fileListAdapter.getItemCount() == 0) {
-                Toast.makeText(this,
-                        "服务器请求频繁，将自动重试（约 " + left + " 秒）",
-                        Toast.LENGTH_SHORT).show();
-                // 退避结束后自动重试一次，用户无需手动操作
-                final String retryPath = requestPath;
-                mainHandler.postDelayed(() -> {
-                    if (retryPath.equals(currentPath) && !isInBackoff()) {
-                        loadCurrentPath();
-                    }
-                }, (left + 1) * 1000);
-            }
-            return;
-        }
-
         if (showLoading) {
             showLoading("正在加载...");
         }
@@ -628,9 +551,6 @@ public class MainActivity extends AppCompatActivity implements
                         Log.d(TAG, "丢弃过期的加载结果: " + requestPath);
                         return;
                     }
-                    // 请求成功：清除失败计数与退避状态
-                    noteRequestSuccess();
-
                     // 更新文件的下载状态
                     updateFileDownloadStates(files);
 
@@ -666,14 +586,15 @@ public class MainActivity extends AppCompatActivity implements
                         return;
                     }
 
-                    // 识别服务端限流（HTTP 429）。
-                    // 这类失败的典型诱因是"短时间内请求过密"，
-                    // 继续猛敲只会让服务端的封禁持续更久，因此必须退避。
-                    boolean rateLimited = isRateLimitError(e);
-                    if (rateLimited) {
-                        enterBackoff("服务器请求过于频繁");
-                    } else {
-                        noteRequestFailure();
+                    // 服务端限流（429）时给明确提示。
+                    // 不做退避/自动重试：本应用的关键防护是"同目录 5 分钟
+                    // 内存缓存"，它已把请求量降到很低；而 OpenList 的 429
+                    // 实际由"认证失败次数"触发，密码正确时不会出现。
+                    // 再加一层退避只会增加复杂度，还可能在误判时挡住正常请求。
+                    if (isRateLimitError(e)) {
+                        if (rlog != null) rlog.w(TAG, "服务端返回 429（限流）: " + requestPath);
+                        Toast.makeText(MainActivity.this,
+                                "服务器繁忙，请稍后再试", Toast.LENGTH_SHORT).show();
                     }
 
                     mainHandler.post(() -> {
@@ -758,14 +679,6 @@ public class MainActivity extends AppCompatActivity implements
         if (!NetworkUtils.isNetworkConnected(this)) {
             swipeRefreshLayout.setRefreshing(false);
             Toast.makeText(this, "网络未连接", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        if (isInBackoff()) {
-            long left = Math.max(1, (backoffUntil - System.currentTimeMillis()) / 1000 + 1);
-            swipeRefreshLayout.setRefreshing(false);
-            Toast.makeText(this, "请求过于频繁，请 " + left + " 秒后再试",
-                    Toast.LENGTH_SHORT).show();
             return;
         }
 
