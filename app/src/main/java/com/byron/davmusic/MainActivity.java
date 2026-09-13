@@ -1038,7 +1038,7 @@ public class MainActivity extends AppCompatActivity implements
                 Log.e(TAG, "上传失败: " + displayName, e);
                 final String msg = e.getMessage() == null ? e.toString() : e.getMessage();
                 mainHandler.post(() -> toast("上传失败: " + displayName + "\n" + msg,
-                        Toast.LENGTH_LONG);.show());
+                        Toast.LENGTH_LONG););
             } finally {
                 if (tmp != null) {
                     //noinspection ResultOfMethodCallIgnored
