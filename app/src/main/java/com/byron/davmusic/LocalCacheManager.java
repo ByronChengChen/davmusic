@@ -39,6 +39,7 @@ public class LocalCacheManager {
         this.context = context.getApplicationContext();
         this.preferences = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
         loadDownloadMap();
+        loadOwnerMap();
     }
 
     public static synchronized LocalCacheManager getInstance(Context context) {
@@ -77,6 +78,8 @@ public class LocalCacheManager {
     public void markFileDownloaded(String remotePath, File localFile) {
         downloadMap.put(remotePath, localFile.getAbsolutePath());
         saveDownloadMap();
+        // 顺带记录归属，供多服务器场景判断「这份本地副本属于谁」
+        claimForCurrentServer(remotePath);
     }
 
     // ---- 离线可用文件索引 ----
@@ -351,6 +354,124 @@ public class LocalCacheManager {
     public boolean hasSnapshot(String folderPath) {
         File snapshotFile = getSnapshotFile(folderPath);
         return snapshotFile.exists();
+    }
+
+    // ---- 服务器归属隔离（多服务器 v1.28 新增）----
+    //
+    // 问题：downloadMap 的键是「远端路径」，而路径只在一台服务器内部唯一。
+    // 两台服务器都可能存在 /dav/music/a.m4a —— 若不加区分，切到 B 服务器后
+    // 播放 a.m4a 会命中 A 服务器下载的本地文件，放出来的是完全不同的音频。
+    //
+    // 做法：记录「每个远端路径是从哪台服务器下载的」，键格式
+    // "serverId\u0000remotePath"。不改动 downloadMap 本身的结构 ——
+    // 它已被下载/删除/离线索引等多处复用，改结构牵连太大；
+    // 这一层只做「归属查询」，互不干扰。
+
+    private static final String KEY_OWNER_MAP = "download_owner_map";
+    private static final String OWNER_SEP = "\u0000";
+    /** 迁移前的历史下载没有归属信息，统一挂到这个虚拟 id 下 */
+    private static final String OWNER_LEGACY = "__legacy__";
+
+    private Map<String, String> ownerMap; // serverId\u0000remotePath -> serverId
+
+    private void loadOwnerMap() {
+        String json = preferences.getString(KEY_OWNER_MAP, "{}");
+        try {
+            JSONObject obj = new JSONObject(json);
+            ownerMap = new HashMap<>();
+            Iterator<String> keys = obj.keys();
+            while (keys.hasNext()) {
+                String k = keys.next();
+                ownerMap.put(k, obj.getString(k));
+            }
+        } catch (JSONException e) {
+            ownerMap = new HashMap<>();
+            Log.e(TAG, "解析下载归属表失败", e);
+        }
+    }
+
+    private void saveOwnerMap() {
+        try {
+            JSONObject obj = new JSONObject();
+            for (Map.Entry<String, String> e : ownerMap.entrySet()) {
+                obj.put(e.getKey(), e.getValue());
+            }
+            preferences.edit().putString(KEY_OWNER_MAP, obj.toString()).apply();
+        } catch (JSONException e) {
+            Log.e(TAG, "保存下载归属表失败", e);
+        }
+    }
+
+    private static String ownerKey(String serverId, String remotePath) {
+        return (serverId == null ? OWNER_LEGACY : serverId) + OWNER_SEP + remotePath;
+    }
+
+    /** 当前活动服务器 id（由 MainActivity 在切换/启动时写入，切一次写一次） */
+    private String currentServerId;
+
+    /**
+     * 告知当前活动服务器。切换服务器时由 UI 层调用。
+     * 只是记录，不删任何文件 —— 其它服务器的下载仍然可用（切回去还能离线听）。
+     */
+    public void setCurrentServerId(String serverId) {
+        this.currentServerId = serverId;
+        Log.d(TAG, "当前服务器 id = " + serverId);
+    }
+
+    public String getCurrentServerId() {
+        return currentServerId;
+    }
+
+    /**
+     * 该远端路径的本地副本是否属于「当前这台服务器」。
+     *
+     * 没有归属记录的历史下载（老版本升上来的）按宽松处理返回 true ——
+     * 宁可沿用本地文件也不误判成「需要重新下载」，避免升级后突然全变在线播放。
+     */
+    public boolean isDownloadedOnCurrentServer(String remotePath) {
+        if (!isDownloaded(remotePath)) return false;
+        if (currentServerId == null) return true;   // 还没告知服务器，宽松放行
+        String owner = ownerMap.get(ownerKey(currentServerId, remotePath));
+        if (owner != null) return currentServerId.equals(owner);
+        // 无归属记录：看它是否被别的服务器认领过
+        String legacy = ownerMap.get(ownerKey(OWNER_LEGACY, remotePath));
+        if (legacy != null) return true;            // 历史遗留，宽松
+        String any = ownerMap.get(remotePath);      // 兼容早期只存裸路径的写法
+        if (any != null) return currentServerId.equals(any);
+        return true;                                // 谁都没认领 → 宽松
+    }
+
+    /** 把某远端路径的本地副本认领给当前服务器（下载完成时调用） */
+    public void claimForCurrentServer(String remotePath) {
+        if (remotePath == null || currentServerId == null) return;
+        ownerMap.put(ownerKey(currentServerId, remotePath), currentServerId);
+        saveOwnerMap();
+    }
+
+    /** 清空服务器归属记录（卸载/清缓存用） */
+    public void clearOwnerMap() {
+        ownerMap.clear();
+        preferences.edit().remove(KEY_OWNER_MAP).apply();
+    }
+
+    /** 删除全部「目录快照」。切换服务器时必须调用，否则同名目录会串内容 */
+    public void clearSnapshots() {
+        try {
+            File dir = getSnapshotDirectory();
+            if (dir != null && dir.exists() && dir.isDirectory()) {
+                File[] files = dir.listFiles();
+                if (files != null) {
+                    for (File f : files) {
+                        if (!f.delete()) {
+                            Log.w(TAG, "快照删除失败: " + f.getAbsolutePath());
+                        }
+                    }
+                }
+            }
+            Log.d(TAG, "已清空全部目录快照");
+        } catch (Exception e) {
+            Log.e(TAG, "清空目录快照失败", e);
+        }
     }
 
     // 清空缓存

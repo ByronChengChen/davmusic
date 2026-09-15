@@ -61,6 +61,17 @@
             android:theme="@style/Theme.DavMusic.NoActionBar"
             android:screenOrientation="portrait" />
         
+        <!-- WebDAV 服务器管理页：新增/删除/切换服务器。
+             用 NoActionBar 主题（自己放 Toolbar），与主界面一致；
+             不进 launcher，只从主界面「更多」菜单进入。 -->
+        <activity
+            android:name="com.byron.davmusic.ServerManageActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.DavMusic.NoActionBar"
+            android:screenOrientation="portrait"
+            android:parentActivityName="com.byron.davmusic.MainActivity" />
+
         <!-- 播放前台服务：承载播放状态与常驻通知，实现后台保活。
              foregroundServiceType 必须与代码中 startForeground 声明的类型一致
              （Android 14+ 强制校验，不一致会抛异常）。 -->

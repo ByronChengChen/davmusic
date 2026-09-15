@@ -88,4 +88,36 @@
     <string name="download_state_not_downloaded">未下载</string>
     <string name="download_state_downloading">下载中</string>
     <string name="download_state_downloaded">已下载</string>
+
+    <!-- ===== 定位到当前歌曲（主界面「更多」菜单）===== -->
+    <string name="menu_locate_current">定位到当前歌曲</string>
+    <string name="msg_no_track_playing">当前没有正在播放的歌曲</string>
+    <string name="msg_list_not_ready">列表还没加载完，稍后再试</string>
+    <string name="msg_located_track">已定位到：%s</string>
+    <string name="msg_track_in_other_dir">正在播放的歌曲不在本目录\n所在目录：%s</string>
+
+    <!-- ===== WebDAV 服务器管理页 ===== -->
+    <string name="title_server_manage">WebDAV 服务器</string>
+    <string name="btn_add_server">添加服务器</string>
+    <string name="server_active_badge">当前使用</string>
+    <string name="empty_server_list">还没有任何 WebDAV 服务器\n点下方「添加服务器」新增一台</string>
+    <string name="label_server_count">共 %1$d 台服务器 · 点一项即可切换</string>
+    <string name="hint_server_name">名称（可选，便于区分，如「移动云盘」）</string>
+    <string name="title_add_server">添加 WebDAV 服务器</string>
+    <string name="title_edit_server">编辑 WebDAV 服务器</string>
+    <string name="msg_switched_server">已切换到：%s</string>
+    <string name="msg_already_active_server">这已经是当前使用的服务器</string>
+    <string name="msg_server_incomplete">该服务器配置不完整，请长按编辑补全</string>
+    <string name="msg_server_added">已添加：%s</string>
+    <string name="msg_server_updated">已保存：%s</string>
+    <string name="msg_server_deleted">已删除：%s</string>
+    <string name="msg_server_switched_after_delete">已删除当前服务器，自动切到：%s</string>
+    <string name="title_delete_server">删除服务器</string>
+    <string name="msg_confirm_delete_server">确定删除「%s」吗？\n（只删除配置，不会删除服务器上的文件；已下载到本地的歌曲会保留）</string>
+    <string name="msg_deleted_last_server">已删除最后一台服务器，请重新配置</string>
+    <string name="msg_testing">正在测试…</string>
+    <string name="msg_connection_http_error">服务器已响应但返回 %d，请检查地址与权限</string>
+    <string name="menu_delete_server">删除</string>
+    <string name="menu_edit_server">编辑</string>
+    <string name="btn_save">保存</string>
 </resources>

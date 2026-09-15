@@ -575,7 +575,9 @@ public class MusicPlayer {
     private String resolvePlayUrl(WebDAVFile file) {
         if (file == null) return null;
         LocalCacheManager cm = LocalCacheManager.getInstance(context);
-        if (cm.isDownloaded(file.getHref())) {
+        // 用「当前服务器上的本地副本」判定：本地文件若来自另一台服务器，
+        // 同名路径下内容可能完全不同，必须改走当前服务器的流
+        if (cm.isDownloadedOnCurrentServer(file.getHref())) {
             File local = cm.getLocalFile(file.getHref());
             if (local != null && local.exists()) {
                 return "file://" + local.getAbsolutePath();
@@ -584,6 +586,29 @@ public class MusicPlayer {
         return WebDAVClient.getInstance().getDownloadUrl(file);
     }
     
+    /**
+     * 切换 WebDAV 服务器时清空播放状态。
+     *
+     * 为什么必须清：播放列表里存的是 WebDAVFile，它们只对「下载时那台服务器」
+     * 有意义 —— href/relativePath 都是那台服务器上的路径。切到新服务器后若
+     * 留着旧队列：
+     *   · 点「下一首」会用新服务器的 baseUrl 去取旧服务器的路径 → 404/403
+     *   · 迷你播放器还显示旧服务器的曲目，与当前浏览内容对不上
+     * 所以这里停播 + 清队列 + 复位索引，让状态回到「干净的空播放器」。
+     */
+    public void clearForServerSwitch() {
+        rlog.i(TAG, "clearForServerSwitch(): 服务器已切换，清空播放状态");
+        try {
+            stop();
+        } catch (Exception e) {
+            Log.w(TAG, "停止播放失败（忽略）: " + e.getMessage());
+        }
+        playlist = new ArrayList<>();
+        currentPosition = -1;
+        currentUrl = null;
+        notifyTrackChanged(null);
+    }
+
     public void setPlaylist(List<WebDAVFile> playlist, int startIndex) {
         this.playlist = playlist != null ? new ArrayList<>(playlist) : new ArrayList<>();
         this.currentPosition = startIndex >= 0 && startIndex < this.playlist.size() ? startIndex : -1;
@@ -599,13 +624,13 @@ public class MusicPlayer {
         rlog.i(TAG, "playFile: " + file.getDisplayName()
                 + " | pos=" + currentPosition
                 + " | downloaded=" + LocalCacheManager.getInstance(context)
-                        .isDownloaded(file.getHref()));
+                        .isDownloadedOnCurrentServer(file.getHref()));
         
         // 确定播放 URL
         String url;
         LocalCacheManager cacheManager = LocalCacheManager.getInstance(context);
         
-        if (cacheManager.isDownloaded(file.getHref())) {
+        if (cacheManager.isDownloadedOnCurrentServer(file.getHref())) {
             // 播放本地文件
             File localFile = cacheManager.getLocalFile(file.getHref());
             if (localFile != null && localFile.exists()) {
@@ -650,6 +675,17 @@ public class MusicPlayer {
 
     /** 判断两个文件是否同一首：优先 href，回退到 relativePath（href 可能编码不一致）*/
     private boolean sameFile(WebDAVFile a, WebDAVFile b) {
+        return isSameTrack(a, b);
+    }
+
+    /**
+     * 判断两个条目是不是同一首歌（公开静态，供 UI 层复用）。
+     *
+     * 先比 href（服务器上的绝对路径），再退回 relativePath —— 两者任一相同
+     * 即认为是同一首。href 可能因服务器返回的编码差异而不同，所以
+     * 不能只靠 href。
+     */
+    public static boolean isSameTrack(WebDAVFile a, WebDAVFile b) {
         if (a == null || b == null) return false;
         String ha = a.getHref(), hb = b.getHref();
         if (ha != null && ha.equals(hb)) return true;

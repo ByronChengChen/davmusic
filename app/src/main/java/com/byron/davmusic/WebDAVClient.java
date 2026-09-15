@@ -500,6 +500,57 @@ public class WebDAVClient {
         });
     }
 
+    /**
+     * 用【指定的】凭据做一次连通性探测，不修改单例的当前配置。
+     *
+     * 为什么要单独一个静态方法：服务器管理页里可能同时存着多台服务器，
+     * 用户点「测试连接」时若直接 configure() 单例，一旦随后取消，
+     * 客户端就会停留在「被测试的那台」上 —— 正在浏览/播放的服务器被
+     * 悄悄换掉。这里只发一个独立请求，不碰任何实例字段。
+     *
+     * 复用单例的 OkHttpClient 只是为了共享连接池与超时配置，与凭据无关。
+     */
+    public static void testConnectionWith(final String baseUrl,
+                                          final String username,
+                                          final String password,
+                                          final WebDAVCallback<Integer> callback) {
+        if (baseUrl == null || baseUrl.trim().isEmpty()) {
+            callback.onError(new Exception("服务器地址为空"));
+            return;
+        }
+        String url = baseUrl.trim();
+        if (!url.endsWith("/")) {
+            url += "/";
+        }
+        String credentials = (username == null ? "" : username) + ":" + (password == null ? "" : password);
+        String auth = "Basic " + Base64.encodeToString(credentials.getBytes(), Base64.NO_WRAP);
+
+        Request request = new Request.Builder()
+                .url(url)
+                .method("PROPFIND", RequestBody.create("", null))
+                .header("Depth", "0")
+                .header("Authorization", auth)
+                .build();
+
+        getInstance().client.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                callback.onError(e);
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                try {
+                    // 把真实 HTTP 状态码交回调用方：401/403 是凭据问题，404 是路径问题，
+                    // 207 才是 WebDAV 正常应答 —— 只回 true/false 会让用户分不清错在哪。
+                    callback.onSuccess(response.code());
+                } finally {
+                    response.close();
+                }
+            }
+        });
+    }
+
     // 解析 PROPFIND 响应
     //
     // 关于 href 的处理（关键，曾导致路径错乱、404、同名文件夹重复）：

@@ -9,6 +9,11 @@
         app:showAsAction="ifRoom" />
 
     <item
+        android:id="@+id/menu_locate_current"
+        android:title="@string/menu_locate_current"
+        app:showAsAction="never" />
+
+    <item
         android:id="@+id/menu_settings"
         android:title="@string/menu_settings"
         app:showAsAction="never" />
