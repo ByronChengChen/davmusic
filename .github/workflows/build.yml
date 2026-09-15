@@ -21,6 +21,11 @@ jobs:
 
     - name: Set up Android SDK
       uses: android-actions/setup-android@v3
+      with:
+        # 默认会尝试装 'tools' 包，该包已从 sdkmanager 仓库移除，
+        # 会导致整步 exit 1。显式指定需要的包，避免抓不存在的 'tools'。
+        packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
+        log-accepted-android-sdk-licenses: false
 
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v4
