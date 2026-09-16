@@ -82,8 +82,10 @@ public class ServerManageActivity extends AppCompatActivity implements ServerLis
     /** 重新读一遍清单并刷新界面 */
     private void refresh() {
         List<ServerProfile> servers = ServerStore.list(this);
-        ServerProfile active = ServerStore.getActive(this);
-        adapter.setData(servers, active == null ? null : active.getId());
+        // 【服务器即根目录】没有「当前使用的服务器」这个概念了 ——
+        // 每台都是根目录里的一个条目，进入哪台看主界面的选择。
+        // 因此列表不再渲染「当前使用」标记。
+        adapter.setData(servers);
 
         boolean empty = servers.isEmpty();
         emptyView.setVisibility(empty ? View.VISIBLE : View.GONE);
@@ -96,26 +98,26 @@ public class ServerManageActivity extends AppCompatActivity implements ServerLis
 
     // ==================== 列表交互 ====================
 
+    /** 移到根目录顶部：点它=进入该服务器浏览 */
     @Override
     public void onSwitch(ServerProfile profile) {
+        // 【服务器即根目录】这里的「点击」语义已从「设为当前服务器」变为
+        // 「进入这台服务器浏览」—— 用 setResult 带回 id，主界面据此进入。
         if (profile == null) return;
-
-        ServerProfile active = ServerStore.getActive(this);
-        if (active != null && active.getId() != null && active.getId().equals(profile.getId())) {
-            toast(getString(R.string.msg_already_active_server));
-            return;
-        }
         if (!profile.isComplete()) {
             toast(getString(R.string.msg_server_incomplete));
             return;
         }
+        Log.i(TAG, "进入服务器: " + profile.getDisplayName() + " url=" + profile.getUrl());
 
-        ServerStore.setActive(this, profile.getId());
-        Log.i(TAG, "切换到服务器: " + profile.getDisplayName() + " url=" + profile.getUrl());
-        toast(getString(R.string.msg_switched_server, profile.getDisplayName()));
-        setResult(RESULT_OK);
-        refresh();
+        Intent data = new Intent();
+        data.putExtra(EXTRA_ENTER_SERVER_ID, profile.getId());
+        setResult(RESULT_OK, data);
+        finish();
     }
+
+    /** 主界面从结果里读这个 key，拿到要进入的服务器 id */
+    public static final String EXTRA_ENTER_SERVER_ID = "enter_server_id";
 
     @Override
     public void onEdit(ServerProfile profile) {
@@ -134,33 +136,22 @@ public class ServerManageActivity extends AppCompatActivity implements ServerLis
     }
 
     private void doDelete(ServerProfile profile) {
-        ServerProfile before = ServerStore.getActive(this);
-        boolean wasActive = before != null && before.getId() != null
-                && before.getId().equals(profile.getId());
-
         ServerStore.remove(this, profile.getId());
-        Log.i(TAG, "已删除服务器: " + profile.getDisplayName() + "（是否为活动服务器=" + wasActive + "）");
+        Log.i(TAG, "已删除服务器: " + profile.getDisplayName());
         setResult(RESULT_OK);
 
         List<ServerProfile> remain = ServerStore.list(this);
         if (remain.isEmpty()) {
-            // 最后一台被删掉：主界面已无可用的服务器，
-            // 回首次配置页重新录入，避免主界面拿空地址发请求
+            // 全删光了：主界面无服务器可用，引导去添加
             toast(getString(R.string.msg_deleted_last_server));
-            Intent intent = new Intent(this, ServerConfigActivity.class);
-            intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(intent);
             finish();
             return;
         }
 
-        if (wasActive) {
-            ServerProfile now = ServerStore.getActive(this);
-            toast(getString(R.string.msg_server_switched_after_delete,
-                    now == null ? "" : now.getDisplayName()));
-        } else {
-            toast(getString(R.string.msg_server_deleted, profile.getDisplayName()));
-        }
+        // 【服务器即根目录】删除不再需要「自动切到剩下第一台」——
+        // 没有活动服务器这回事了。主界面在 onResume 会自行判断
+        // 「正在浏览的那台是否已被删除」，必要时退回根目录。
+        toast(getString(R.string.msg_server_deleted, profile.getDisplayName()));
         refresh();
     }
 
@@ -252,6 +243,18 @@ public class ServerManageActivity extends AppCompatActivity implements ServerLis
         String user = userInput.getText().toString().trim();
         String pass = passInput.getText().toString();
 
+        // 【别名】—— 服务器现在是根目录的第一层，别名就是「文件夹名」，
+        // 因此必填且必须唯一：重复的别名会让用户在根目录里无法分辨两台，
+        // 也会让「定位到当前歌曲」提示的服务器名产生歧义。
+        if (TextUtils.isEmpty(name)) {
+            toast(getString(R.string.error_alias_required));
+            return null;
+        }
+        if (isAliasTaken(name, existing)) {
+            toast(getString(R.string.error_alias_duplicate, name));
+            return null;
+        }
+
         if (TextUtils.isEmpty(url)) {
             toast(getString(R.string.error_server_url_required));
             return null;
@@ -288,6 +291,29 @@ public class ServerManageActivity extends AppCompatActivity implements ServerLis
             toast(getString(R.string.msg_server_updated, p.getDisplayName()));
         }
         return p;
+    }
+
+    /**
+     * 别名是否已被别的服务器占用。
+     *
+     * 编辑场景要排除「自己」：否则改一下地址、别名不动就会被自己挡住。
+     * 比较时忽略大小写与首尾空格 —— 「A盘」和「a盘」在列表里看起来是
+     * 同一个名字，允许同时存在只会让用户困惑。
+     */
+    private boolean isAliasTaken(String alias, ServerProfile self) {
+        if (alias == null) return false;
+        String target = alias.trim().toLowerCase(java.util.Locale.US);
+        String selfId = (self != null) ? self.getId() : null;
+
+        for (ServerProfile p : ServerStore.list(this)) {
+            if (selfId != null && selfId.equals(p.getId())) continue;   // 跳过自己
+            String other = p.getName();
+            if (other == null) continue;
+            if (other.trim().toLowerCase(java.util.Locale.US).equals(target)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void showTestResult(TextView tv, String text, Boolean ok) {

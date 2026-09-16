@@ -189,15 +189,39 @@ public class ServerStore {
         String url = p.getString(KEY_SERVER_URL, "");
         boolean configured = p.getBoolean(KEY_IS_CONFIGURED, false);
         if (configured && url != null && !url.trim().isEmpty()) {
+            // 别名现在必填（服务器是根目录的第一层，别名就是「文件夹名」）。
+            // 老配置没有别名，这里补一个默认的，避免升级后根目录里
+            // 显示成一个空名字或主机名。
+            String host = url;
+            int scheme = host.indexOf("://");
+            if (scheme >= 0) host = host.substring(scheme + 3);
+            int slash = host.indexOf('/');
+            if (slash >= 0) host = host.substring(0, slash);
+            String defaultName = host.isEmpty() ? "我的服务器" : host;
+
             ServerProfile first = new ServerProfile(
                     UUID.randomUUID().toString(),
-                    "",
+                    defaultName,
                     url,
                     p.getString(KEY_USERNAME, ""),
                     p.getString(KEY_PASSWORD, ""));
             list.add(first);
             save(context, list, first.getId());
-            Log.i(TAG, "旧版单服务器配置已迁移为列表第 1 台: " + first.getHost());
+            Log.i(TAG, "旧版单服务器配置已迁移为列表第 1 台: " + first.getDisplayName());
+        }
+        // 台账里已有的服务器若别名为空（更早期的版本写入的），补成主机名，
+        // 保证根目录里不会出现空名字的条目
+        boolean patched = false;
+        for (ServerProfile s : list) {
+            if (s.getName() == null || s.getName().trim().isEmpty()) {
+                String h = s.getHost();
+                s.setName(h.isEmpty() ? "未命名服务器" : h);
+                patched = true;
+            }
+        }
+        if (patched && !list.isEmpty()) {
+            save(context, list, list.get(0).getId());
+            Log.i(TAG, "已为缺少别名的服务器补上默认别名");
         }
         return list;
     }

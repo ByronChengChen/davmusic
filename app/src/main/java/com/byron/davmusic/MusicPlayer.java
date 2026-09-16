@@ -24,7 +24,6 @@ public class MusicPlayer {
     private List<WebDAVFile> playlist;
     private int currentPosition = -1;
     private boolean isPreparing = false;
-    private Map<String, String> authHeaders;
     private String currentUrl;     // 当前播放的 URL，便于错误诊断
 
     // ---- 后台播放支持 ----
@@ -383,6 +382,40 @@ public class MusicPlayer {
         return u.substring(dot + 1).toLowerCase();
     }
 
+    /**
+     * 取某个条目所属服务器的认证头。
+     *
+     * 【多服务器】不能再用一个全局 authHeaders —— 播放队列可能跨服务器，
+     * 每首歌的认证头必须来自它自己所属的那台服务器，否则拉流会 401
+     * （或用错账号的凭据）。返回 null 表示无法确定（调用方走无认证头分支）。
+     */
+    private Map<String, String> authHeadersFor(WebDAVFile file) {
+        if (file == null) return null;
+        ServerProfile p = findServer(file.getServerId());
+        if (p == null || !p.isComplete()) {
+            // 条目没带服务器信息（旧快照）：退回当前正在播放那首的凭据
+            return authHeaders;
+        }
+        String credentials = (p.getUsername() == null ? "" : p.getUsername())
+                + ":" + (p.getPassword() == null ? "" : p.getPassword());
+        Map<String, String> h = new HashMap<>();
+        h.put("Authorization", "Basic " + android.util.Base64.encodeToString(
+                credentials.getBytes(), android.util.Base64.NO_WRAP));
+        return h;
+    }
+
+    /**
+     * 为即将播放的条目刷新 authHeaders。
+     * @return 计算出的认证头
+     */
+    private Map<String, String> applyAuthHeadersFor(WebDAVFile file) {
+        Map<String, String> h = authHeadersFor(file);
+        if (h != null) {
+            this.authHeaders = h;
+        }
+        return this.authHeaders;
+    }
+
     public void play(String url, String displayName) {
         if (url == null || url.isEmpty()) {
             notifyError("播放 URL 为空");
@@ -506,10 +539,11 @@ public class MusicPlayer {
                 next.setDataSource(f.getAbsolutePath());
             } else {
                 Uri uri = Uri.parse(url);
-                if (authHeaders != null && !authHeaders.isEmpty()) {
-                    Map<String, String> headers = new HashMap<>();
-                    headers.put("Authorization", authHeaders.get("Authorization"));
-                    next.setDataSource(context, uri, headers);
+                // 【多服务器】预加载的下一首可能属于另一台服务器，
+                // 必须用它自己的凭据，不能用「当前正在播放那首」的
+                Map<String, String> nextAuth = authHeadersFor(nextTrack);
+                if (nextAuth != null && !nextAuth.isEmpty()) {
+                    next.setDataSource(context, uri, nextAuth);
                 } else {
                     next.setDataSource(context, uri);
                 }
@@ -570,43 +604,76 @@ public class MusicPlayer {
 
     /**
      * 解析某曲目的实际播放地址：已下载用本地文件，否则用远端 URL。
-     * 与 playFile 中的判定逻辑保持一致。
+     *
+     * 【多服务器】取流地址来自【条目自己记录的服务器】，而不是「当前浏览的
+     * 服务器」。这是「服务器即根目录」能成立的关键：播放队列可以跨服务器
+     * 共存，点下一首仍会去正确的那台取流。
+     * 服务器已删除时返回 null，由调用方按「无法播放」处理。
      */
     private String resolvePlayUrl(WebDAVFile file) {
         if (file == null) return null;
         LocalCacheManager cm = LocalCacheManager.getInstance(context);
-        // 用「当前服务器上的本地副本」判定：本地文件若来自另一台服务器，
-        // 同名路径下内容可能完全不同，必须改走当前服务器的流
-        if (cm.isDownloadedOnCurrentServer(file.getHref())) {
-            File local = cm.getLocalFile(file.getHref());
+
+        // ① 本地副本优先。缓存键带服务器 id，天然不会串到别的服务器
+        String key = file.getCacheKey();
+        if (cm.isDownloaded(key)) {
+            File local = cm.getLocalFile(key);
             if (local != null && local.exists()) {
                 return "file://" + local.getAbsolutePath();
             }
         }
-        return WebDAVClient.getInstance().getDownloadUrl(file);
-    }
-    
-    /**
-     * 切换 WebDAV 服务器时清空播放状态。
-     *
-     * 为什么必须清：播放列表里存的是 WebDAVFile，它们只对「下载时那台服务器」
-     * 有意义 —— href/relativePath 都是那台服务器上的路径。切到新服务器后若
-     * 留着旧队列：
-     *   · 点「下一首」会用新服务器的 baseUrl 去取旧服务器的路径 → 404/403
-     *   · 迷你播放器还显示旧服务器的曲目，与当前浏览内容对不上
-     * 所以这里停播 + 清队列 + 复位索引，让状态回到「干净的空播放器」。
-     */
-    public void clearForServerSwitch() {
-        rlog.i(TAG, "clearForServerSwitch(): 服务器已切换，清空播放状态");
-        try {
-            stop();
-        } catch (Exception e) {
-            Log.w(TAG, "停止播放失败（忽略）: " + e.getMessage());
+
+        // ② 远端流：用条目所属服务器的客户端
+        WebDAVClient c = clientFor(file);
+        if (c == null) {
+            rlog.w(TAG, "无法解析播放地址：条目所属服务器已不存在 serverId=" + file.getServerId());
+            return null;
         }
-        playlist = new ArrayList<>();
-        currentPosition = -1;
-        currentUrl = null;
-        notifyTrackChanged(null);
+        return c.getDownloadUrl(file);
+    }
+
+    /**
+     * 取「这个条目所属服务器」的客户端。
+     * 条目没带服务器信息时退回旧的单例（兼容旧快照/旧播放列表）。
+     */
+    private WebDAVClient clientFor(WebDAVFile file) {
+        if (file != null && file.getServerId() != null && !file.getServerId().isEmpty()) {
+            ServerProfile p = findServer(file.getServerId());
+            if (p != null && p.isComplete()) {
+                return WebDAVClient.forServer(p);
+            }
+            return null;    // 服务器被删了，明确失败好过用错服务器
+        }
+        return WebDAVClient.getInstance();
+    }
+
+    /** 按 id 找服务器配置 */
+    private ServerProfile findServer(String serverId) {
+        if (serverId == null) return null;
+        List<ServerProfile> all = ServerStore.list(context);
+        for (ServerProfile p : all) {
+            if (serverId.equals(p.getId())) return p;
+        }
+        return null;
+    }
+
+    /**
+     * 把条目按【所属服务器】分包。
+     *
+     * setPlaylist 的入参是「当前目录的文件列表」，现在服务器作为根目录的
+     * 第一层，同一个列表里理论上只含一台服务器的条目；但为稳妥起见，
+     * 仍按 serverId 分组后分别取流（旧快照可能带空 serverId）。
+     */
+    private Map<String, WebDAVClient> clientCache = new HashMap<>();
+
+    private WebDAVClient clientForCached(WebDAVFile file) {
+        String sid = (file == null || file.getServerId() == null) ? "" : file.getServerId();
+        WebDAVClient c = clientCache.get(sid);
+        if (c == null) {
+            c = clientFor(file);
+            if (c != null) clientCache.put(sid, c);
+        }
+        return c;
     }
 
     public void setPlaylist(List<WebDAVFile> playlist, int startIndex) {
@@ -623,30 +690,20 @@ public class MusicPlayer {
         if (file == null) return;
         rlog.i(TAG, "playFile: " + file.getDisplayName()
                 + " | pos=" + currentPosition
-                + " | downloaded=" + LocalCacheManager.getInstance(context)
-                        .isDownloadedOnCurrentServer(file.getHref()));
-        
-        // 确定播放 URL
-        String url;
-        LocalCacheManager cacheManager = LocalCacheManager.getInstance(context);
-        
-        if (cacheManager.isDownloadedOnCurrentServer(file.getHref())) {
-            // 播放本地文件
-            File localFile = cacheManager.getLocalFile(file.getHref());
-            if (localFile != null && localFile.exists()) {
-                url = "file://" + localFile.getAbsolutePath();
-                Log.d(TAG, "播放本地文件: " + localFile.getAbsolutePath());
-            } else {
-                // 本地文件不存在，播放在线文件
-                url = WebDAVClient.getInstance().getDownloadUrl(file);
-                Log.d(TAG, "本地文件不存在，播放在线文件: " + url);
-            }
-        } else {
-            // 播放在线文件
-            url = WebDAVClient.getInstance().getDownloadUrl(file);
-            Log.d(TAG, "播放在线文件: " + url);
+                + " | server=" + file.getServerName());
+
+        // 取流地址统一交给 resolvePlayUrl：它按【条目所属服务器】解析，
+        // 本地副本与远端流的分支都在那里，避免两处逻辑走偏
+        String url = resolvePlayUrl(file);
+        if (url == null) {
+            rlog.w(TAG, "无法解析播放地址，放弃播放: " + file.getDisplayName());
+            notifyError("无法播放：该曲目所属的服务器已不存在");
+            return;
         }
-        
+        // 【多服务器】认证头必须来自这一首所属的服务器：
+        // 播放队列可能跨服务器，全局一组凭据会在切歌时 401
+        applyAuthHeadersFor(file);
+        Log.d(TAG, "播放地址: " + url);
         play(url, file.getDisplayName());
 
         // 同步 currentPosition：只有当列表中的位置与当前记录不一致时才纠正。

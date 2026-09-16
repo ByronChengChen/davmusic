@@ -6,6 +6,19 @@ public class WebDAVFile {
     private String href;
     private String displayName;
     private String relativePath;   // 剥离 baseUrl 并 URL 解码后的相对路径，如 "cmcc/music/苏慧伦"
+
+    /**
+     * 这个条目属于哪台服务器。
+     *
+     * 多服务器（服务器作为根目录第一层）的核心：每个条目自带来源，
+     * 播放列表、缓存、快照都靠它区分，因此
+     *   · 切换服务器不再是特殊操作，只是普通的一次目录导航
+     *   · 播放队列可以跨服务器共存，点「下一首」仍取到正确的那台
+     *   · 两台服务器存在同名路径也不会互相串内容
+     */
+    private String serverId;
+    private String serverName;     // 冗余存一份别名，列表/播放器显示与日志排查用
+
     private long contentLength;
     private String contentType;
     private long lastModified;
@@ -38,6 +51,41 @@ public class WebDAVFile {
 
     public String getRelativePath() {
         return relativePath;
+    }
+
+    public String getServerId() {
+        return serverId;
+    }
+
+    public void setServerId(String serverId) {
+        this.serverId = serverId;
+    }
+
+    public String getServerName() {
+        return serverName;
+    }
+
+    public void setServerName(String serverName) {
+        this.serverName = serverName;
+    }
+
+    /** 给条目打上服务器归属（解析 PROPFIND 结果时统一调用） */
+    public void setOwner(ServerProfile profile) {
+        if (profile == null) return;
+        this.serverId = profile.getId();
+        this.serverName = profile.getDisplayName();
+    }
+
+    /**
+     * 缓存键：服务器 id + 相对路径。
+     *
+     * 本地下载与目录快照都以它为键，两台服务器即使路径完全同名也各自独立。
+     * 没有归属信息时退回纯相对路径 —— 保持与旧版本缓存兼容（升级后
+     * 已下载的歌曲仍能被认出来）。
+     */
+    public String getCacheKey() {
+        String rel = relativePath == null ? "" : relativePath;
+        return (serverId == null || serverId.isEmpty()) ? rel : serverId + ":" + rel;
     }
 
     public void setRelativePath(String relativePath) {

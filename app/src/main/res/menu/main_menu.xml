@@ -9,6 +9,11 @@
         app:showAsAction="ifRoom" />
 
     <item
+        android:id="@+id/menu_manage_servers"
+        android:title="@string/menu_manage_servers"
+        app:showAsAction="never" />
+
+    <item
         android:id="@+id/menu_locate_current"
         android:title="@string/menu_locate_current"
         app:showAsAction="never" />

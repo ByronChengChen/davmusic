@@ -119,5 +119,11 @@
     <string name="msg_connection_http_error">服务器已响应但返回 %d，请检查地址与权限</string>
     <string name="menu_delete_server">删除</string>
     <string name="menu_edit_server">编辑</string>
+    <!-- 多服务器（v1.29）：每台服务器带自己的客户端，界面显示当前服务器名 -->
+    <string name="menu_manage_servers">WebDAV 服务器管理</string>
+    <string name="label_server_root">服务器</string>
+    <string name="error_alias_required">请填写服务器别名</string>
+    <string name="error_alias_duplicate">别名「%s」已存在，请换一个</string>
+    <string name="msg_enter_server">点选一台服务器开始浏览</string>
     <string name="btn_save">保存</string>
 </resources>

@@ -34,19 +34,65 @@ import okhttp3.Response;
 
 public class WebDAVClient {
     private static final String TAG = "WebDAVClient";
+    /** 共享的 OkHttpClient（连接池/线程池应当复用，不必每台服务器一个） */
+    private static OkHttpClient sharedHttpClient;
+    /** 兼容旧调用：指向「会话内默认实例」。多服务器改造后新代码请用 forServer() */
     private static WebDAVClient instance;
     private OkHttpClient client;
     private String baseUrl;
     private String username;
     private String password;
 
+    /**
+     * 这台客户端绑定的服务器。多服务器（服务器即根目录）改造的核心字段：
+     * 请求发往哪台服务器，由实例自己的 server 决定，不再依赖全局可变状态。
+     */
+    private ServerProfile server;
+
     private WebDAVClient() {
-        // 初始化 OkHttpClient
-        client = new OkHttpClient.Builder()
-                .connectTimeout(15, TimeUnit.SECONDS)
-                .readTimeout(60, TimeUnit.SECONDS)
-                .writeTimeout(60, TimeUnit.SECONDS)
-                .build();
+        client = getSharedHttpClient();
+    }
+
+    private WebDAVClient(ServerProfile profile) {
+        this.server = profile;
+        this.client = getSharedHttpClient();
+        if (profile != null) {
+            configure(profile.getUrl(), profile.getUsername(), profile.getPassword());
+        }
+    }
+
+    private static synchronized OkHttpClient getSharedHttpClient() {
+        if (sharedHttpClient == null) {
+            sharedHttpClient = new OkHttpClient.Builder()
+                    .connectTimeout(15, TimeUnit.SECONDS)
+                    .readTimeout(60, TimeUnit.SECONDS)
+                    .writeTimeout(60, TimeUnit.SECONDS)
+                    .build();
+        }
+        return sharedHttpClient;
+    }
+
+    /**
+     * 为指定服务器创建客户端。
+     *
+     * 每次调用都新建一个轻量对象（真正重的 OkHttpClient 是共享的），
+     * 因此可以放心地按需创建、随用随弃，不存在泄漏。
+     * 返回的实例自带 baseUrl 与凭据，多个实例互不干扰 ——
+     * 这正是「服务器当根目录」能成立的前提：请求来源由条目自带，
+     * 而不是取决于「当前选中的是哪台」。
+     */
+    public static WebDAVClient forServer(ServerProfile profile) {
+        return new WebDAVClient(profile);
+    }
+
+    /** 该客户端所属的服务器；用旧式 getInstance() 创建时为 null */
+    public ServerProfile getServer() {
+        return server;
+    }
+
+    /** 该客户端所属服务器的显示别名 */
+    public String getServerName() {
+        return server == null ? null : server.getDisplayName();
     }
 
     public static synchronized WebDAVClient getInstance() {
@@ -607,6 +653,8 @@ public class WebDAVClient {
             file.setDisplayName(lastSegment(relPath));
             // 保存规范化后的相对路径，供快照与后续拼接使用
             file.setRelativePath(relPath);
+            // 打上服务器归属：条目自带来源，后续取流/缓存/播放队列都靠它
+            file.setOwner(server);
 
             // 获取属性
             Element propstat = getChildElement(response, "DAV:", "propstat");

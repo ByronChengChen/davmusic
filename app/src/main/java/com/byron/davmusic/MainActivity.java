@@ -69,10 +69,18 @@ public class MainActivity extends AppCompatActivity implements
     
     private List<String> pathStack = new ArrayList<>();
     private String currentPath = "/";
-    /** 已经生效（已 configure 进 WebDAVClient / 播放器）的服务器 id。
-     *  从「服务器管理」页回来后靠它判断活动服务器变了没 —— 变了就必须
-     *  换数据源 + 清掉所有按路径存的缓存，否则新旧服务器会串台。 */
-    private String appliedServerId = null;
+    /**
+     * 当前正在浏览的服务器。
+     *
+     * null = 停留在「根目录」，也就是服务器列表本身。
+     * 非 null = 已进入某个服务器的目录树，currentPath 是它在【该服务器内】
+     * 的相对路径（不含服务器前缀）。
+     *
+     * 这是「服务器当根目录」的核心状态：服务器本身就是第一层目录，
+     * 因此不需要「活动服务器」这种全局概念，也不会出现
+     * 「切了服务器但界面还在用旧地址」的两套状态。
+     */
+    private ServerProfile currentServer;
     private boolean isOfflineMode = false;
     private boolean isSeeking = false;   // 用户正在拖动进度条时，暂停自动刷新
 
@@ -153,6 +161,8 @@ public class MainActivity extends AppCompatActivity implements
     private androidx.activity.result.ActivityResultLauncher<String[]> uploadPicker;
     /** Android 13+ 通知权限申请 */
     private androidx.activity.result.ActivityResultLauncher<String> notificationPermLauncher;
+    /** 服务器管理页的回传：用户可能点了「进入某台服务器」 */
+    private androidx.activity.result.ActivityResultLauncher<Intent> serverManageLauncher;
     /** 多选上传的队列，逐个串行上传 */
     private final java.util.Deque<Uri> uploadQueue = new java.util.ArrayDeque<>();
     private int uploadTotal = 0;
@@ -191,6 +201,25 @@ public class MainActivity extends AppCompatActivity implements
                     }
                 });
         requestNotificationPermissionIfNeeded();
+
+        // 服务器管理页可能带回「进入某台服务器」的指令
+        serverManageLauncher = registerForActivityResult(
+                new androidx.activity.result.contract.ActivityResultContracts
+                        .StartActivityForResult(),
+                result -> {
+                    Intent data = (result == null) ? null : result.getData();
+                    String enterId = (data == null) ? null
+                            : data.getStringExtra(ServerManageActivity.EXTRA_ENTER_SERVER_ID);
+                    if (enterId != null) {
+                        ServerProfile target = findServerById(enterId);
+                        if (target != null) {
+                            enterServer(target);
+                            return;
+                        }
+                    }
+                    // 没带「进入」指令：只刷新清单（可能新增/删除/改名了）
+                    syncServerListState();
+                });
 
         // 无需运行时权限：下载写入的是 App 私有目录（getExternalFilesDir），
         // 上传通过系统文件选择器（SAF）由系统代读，均不需要存储权限。
@@ -303,41 +332,57 @@ public class MainActivity extends AppCompatActivity implements
     }
     
     private void initManagers() {
-        // 取【当前活动服务器】。
-        // 多服务器（v1.28 新增）由 ServerStore 统一管理；旧版的单服务器
-        // 配置会在它首次读取时自动迁移成「服务器 #1」，所以老用户升级后
-        // 配置不会丢，这里也无需再判断两套存储。
-        ServerProfile active = ServerStore.getActive(this);
-        String serverUrl = active != null ? active.getUrl() : "";
-        String username = active != null ? active.getUsername() : "";
-        String password = active != null ? active.getPassword() : "";
+        // 【多服务器 / 服务器即根目录】不再需要「全局活动服务器」——
+        // 每条曲目自带 serverId，取流时按它找服务器，所以这里
+        // 不再把某一台服务器 configure 到全局单例上。
+        rlog = RemoteLogger.getInstance(this);
+        cacheManager = LocalCacheManager.getInstance(this);
 
-        // 保险：配置缺失时引导回配置页，避免后续请求静默失败
-        if (serverUrl == null || serverUrl.trim().isEmpty()) {
-            toast("请先配置 WebDAV 服务器", Toast.LENGTH_LONG);
-            startActivity(new Intent(this, ServerConfigActivity.class));
+        // 一台都没有 → 引导去添加
+        List<ServerProfile> servers = ServerStore.list(this);
+        if (servers.isEmpty()) {
+            toast("请先添加 WebDAV 服务器", Toast.LENGTH_LONG);
+            serverManageLauncher.launch(new Intent(this, ServerManageActivity.class));
             finish();
             return;
         }
+        rlog.i(TAG, "MainActivity initManagers，共 " + servers.size() + " 台服务器");
 
-        // 配置 WebDAV 客户端
-        rlog = RemoteLogger.getInstance(this);
-        rlog.i(TAG, "MainActivity initManagers，活动服务器=" + active.getDisplayName()
-                + " (" + serverUrl + ")");
-        appliedServerId = active.getId();
-        webDAVClient = WebDAVClient.getInstance();
-        webDAVClient.configure(serverUrl, username, password);
-        
-        // 初始化缓存管理器
-        cacheManager = LocalCacheManager.getInstance(this);
-        // 把当前服务器告知缓存层：本地副本要按服务器区分，
-        // 否则两台服务器同名路径会互相命中对方下载的文件
-        cacheManager.setCurrentServerId(active.getId());
-        
-        // 初始化音乐播放器
+        // 兼容旧代码：webDAVClient 保留指向「第一台」的实例，
+        // 但所有按目录/按曲目的请求都走各自条目的服务器（见 clientFor）
+        webDAVClient = WebDAVClient.forServer(servers.get(0));
+
         musicPlayer = MusicPlayer.getInstance(this);
-        musicPlayer.setAuthHeaders(buildAuthHeaders(username, password));
         musicPlayer.addPlaybackListener(this);
+    }
+
+    /**
+     * 构造缓存键：服务器 id + 目录相对路径。
+     *
+     * 目录的内存缓存与磁盘快照都用它做键，于是「两台服务器有同名目录」
+     * 这件事天然不再冲突 —— 切换服务器不必再清空缓存（旧实现要清）。
+     * 没有服务器（根目录）时退回纯路径。
+     */
+    private String cacheKeyOf(ServerProfile server, String path) {
+        String p = (path == null || path.isEmpty()) ? "/" : path;
+        if (server == null || server.getId() == null || server.getId().isEmpty()) {
+            return p;
+        }
+        return server.getId() + ":" + p;
+    }
+
+    /** 取某台服务器的客户端（目录浏览、上传等按服务器发请求） */
+    private WebDAVClient clientFor(ServerProfile profile) {
+        // profile 为 null 时（例如旧快照里的条目没有服务器归属）
+        // 退回已初始化的那台，避免 NPE；调用方不应依赖此时的正确性
+        if (profile == null) {
+            if (webDAVClient == null) {
+                List<ServerProfile> all = ServerStore.list(this);
+                webDAVClient = WebDAVClient.forServer(all.isEmpty() ? null : all.get(0));
+            }
+            return webDAVClient;
+        }
+        return WebDAVClient.forServer(profile);
     }
 
     /** 组装 Basic 认证头（WebDAVClient 与播放器流式请求都要用同一份） */
@@ -353,6 +398,69 @@ public class MainActivity extends AppCompatActivity implements
         updatePlayerUI();
     }
     
+    /** 进入某台服务器：清空导航状态，从它的根目录开始浏览 */
+    private void enterServer(ServerProfile profile) {
+        if (profile == null) return;
+        if (!profile.isComplete()) {
+            toast(getString(R.string.msg_server_incomplete));
+            return;
+        }
+        if (rlog != null) {
+            rlog.i(TAG, "进入服务器: " + profile.getDisplayName() + " (" + profile.getUrl() + ")");
+        }
+        currentServer = profile;
+        // 换服务器时必须重置导航状态与请求序号，避免旧服务器的
+        // 异步回调回来把列表覆盖成另一台的内容
+        pathStack.clear();
+        currentPath = "/";
+        loadToken++;
+        if (fileListAdapter != null) {
+            fileListAdapter.setFiles(new ArrayList<>());
+        }
+        loadCurrentPath();
+    }
+
+    /** 回到根目录（服务器列表） */
+    private void exitToServerRoot() {
+        currentServer = null;
+        pathStack.clear();
+        currentPath = "/";
+        loadToken++;        // 作废在途请求
+        loadCurrentPath();
+    }
+
+    /**
+     * 根目录：列出全部已保存的服务器（每台当做一个「文件夹」）。
+     * 不发起任何网络请求，纯本地渲染。
+     */
+    private void showServerRoot() {
+        updateNetworkStatus();
+        List<ServerProfile> servers = ServerStore.list(this);
+
+        List<WebDAVFile> rows = new ArrayList<>();
+        for (ServerProfile p : servers) {
+            WebDAVFile f = new WebDAVFile();
+            // 用「服务器」这个虚拟容器承载，isCollection=true 让它
+            // 复用文件列表的文件夹渲染与点击进入逻辑
+            f.setDisplayName(p.getDisplayName());
+            f.setCollection(true);
+            f.setServerId(p.getId());
+            f.setServerName(p.getDisplayName());
+            f.setRelativePath("");
+            // 用别名做二次行，显示账号便于区分同址不同账号的两台
+            rows.add(f);
+        }
+
+        fileListAdapter.setFiles(rows);
+        fileListAdapter.setOfflineMode(false);
+        updatePathDisplay();
+        swipeRefreshLayout.setRefreshing(false);
+
+        if (rlog != null) {
+            rlog.i(TAG, "[根目录] 列出服务器 " + rows.size() + " 台");
+        }
+    }
+
     /**
      * 加载当前目录。
      *
@@ -368,9 +476,18 @@ public class MainActivity extends AppCompatActivity implements
      * 表现为"同一文件夹不同时间进去内容还不一样"。
      */
     private void loadCurrentPath() {
+        // 【根目录 = 服务器列表】
+        // 这是「服务器即根目录」的入口：根目录不请求任何 WebDAV，
+        // 直接把已保存的服务器当作「文件夹」列出来，点进去才是那台
+        // 服务器的目录树。因此这里不走缓存/快照/网络那套流程。
+        if (currentServer == null) {
+            showServerRoot();
+            return;
+        }
+
         if (!webDAVClient.isConfigured()) {
             // 如果未配置，跳转到配置界面
-            startActivity(new Intent(this, ServerConfigActivity.class));
+            serverManageLauncher.launch(new Intent(this, ServerManageActivity.class));
             finish();
             return;
         }
@@ -387,6 +504,9 @@ public class MainActivity extends AppCompatActivity implements
         // 否则交叠的旧请求会覆盖新请求的结果（列表闪烁、条目时有时无）
         final int token = ++loadToken;
         final String requestPath = currentPath;
+        // 缓存键 = 服务器 id + 目录相对路径：两台服务器同名目录互不干扰，
+        // 因此切换服务器不再需要清空缓存
+        final String cacheKey = cacheKeyOf(currentServer, requestPath);
 
         // 返回时先清空列表，避免把上一个目录的文件短暂显示成当前目录的内容。
         // 若下面命中快照会立刻重新填充。
@@ -411,16 +531,16 @@ public class MainActivity extends AppCompatActivity implements
 
         // 【内存缓存优先】这是减少请求的关键路径。
         // "返回上级"所需的数据刚刚才请求过，命中时一个请求都不发。
-        List<WebDAVFile> mem = getDirCache(requestPath);
+        List<WebDAVFile> mem = getDirCache(cacheKey);
         if (mem != null) {
             updateFileDownloadStates(mem);
             fileListAdapter.setFiles(mem);
             fileListAdapter.setOfflineMode(false);
 
-            if (isDirCacheFresh(requestPath)) {
+            if (isDirCacheFresh(cacheKey)) {
                 // 5 分钟内看过的目录：完全静默，不发任何请求
                 if (rlog != null) {
-                    rlog.i(TAG, "[内存缓存] 命中且新鲜，跳过网络请求: " + requestPath
+                    rlog.i(TAG, "[内存缓存] 命中且新鲜，跳过网络请求: " + cacheKey
                             + " (" + mem.size() + " 项)");
                 }
                 swipeRefreshLayout.setRefreshing(false);
@@ -429,7 +549,7 @@ public class MainActivity extends AppCompatActivity implements
 
             // 缓存已过期：先用旧数据渲染，再后台静默校准
             if (rlog != null) {
-                rlog.i(TAG, "[内存缓存] 命中但过期，后台静默刷新: " + requestPath);
+                rlog.i(TAG, "[内存缓存] 命中但过期，后台静默刷新: " + cacheKey);
             }
             loadFromServer(false, token, requestPath);
             return;
@@ -437,17 +557,17 @@ public class MainActivity extends AppCompatActivity implements
 
         // 未命中内存缓存：走原有逻辑（磁盘快照先渲染 + 网络请求）
         boolean rendered = false;
-        List<WebDAVFile> cached = cacheManager.loadSnapshot(requestPath);
+        List<WebDAVFile> cached = cacheManager.loadSnapshot(cacheKey);
         if (cached != null && !cached.isEmpty()) {
             updateFileDownloadStates(cached);
             fileListAdapter.setFiles(cached);
             fileListAdapter.setOfflineMode(false);
             rendered = true;
             if (rlog != null) {
-                rlog.i(TAG, "[在线] 命中磁盘快照 " + cached.size() + " 项: " + requestPath);
+                rlog.i(TAG, "[在线] 命中磁盘快照 " + cached.size() + " 项: " + cacheKey);
             }
         } else if (rlog != null) {
-            rlog.i(TAG, "[在线] 无快照: " + requestPath);
+            rlog.i(TAG, "[在线] 无快照: " + cacheKey);
         }
 
         loadFromServer(!rendered, token, requestPath);
@@ -558,8 +678,16 @@ public class MainActivity extends AppCompatActivity implements
             showLoading("正在加载...");
         }
 
+        // 【多服务器】请求发往【当前浏览的服务器】，并把它捕获成 final，
+        // 供回调里写快照/内存缓存时构造带服务器前缀的键。
+        // 若在这里直接用 currentServer，用户在请求飞行途中切了服务器，
+        // 回来时就会把 A 的内容写进 B 的缓存 —— 必须捕获当时的那个。
+        final ServerProfile serverAtRequest = currentServer;
+        final String cacheKey = cacheKeyOf(serverAtRequest, requestPath);
+
         executorService.execute(() -> {
-            webDAVClient.listFolder(requestPath, new WebDAVClient.WebDAVCallback<List<WebDAVFile>>() {
+            clientFor(serverAtRequest).listFolder(requestPath,
+                    new WebDAVClient.WebDAVCallback<List<WebDAVFile>>() {
                 @Override
                 public void onSuccess(List<WebDAVFile> files) {
                     // 已有更新的加载请求 → 丢弃本次结果。
@@ -579,10 +707,12 @@ public class MainActivity extends AppCompatActivity implements
                     // "这份数据属于哪个目录"。若用 currentPath，当用户已切到
                     // 别的目录、而这个旧请求恰好通过校验（边界情况）时，
                     // 会把 A 目录的内容写进 B 目录的快照，导致内容错乱与闪烁。
+                    //
+                    // cacheKey 里含服务器 id，两台服务器同名目录互不覆盖。
                     if (files != null && !files.isEmpty()) {
-                        cacheManager.saveSnapshot(requestPath, files);
+                        cacheManager.saveSnapshot(cacheKey, files);
                         // 同步写入内存缓存，后续"返回上级"可零请求命中
-                        putDirCache(requestPath, files);
+                        putDirCache(cacheKey, files);
                     }
 
                     // 更新 UI
@@ -647,9 +777,9 @@ public class MainActivity extends AppCompatActivity implements
     private void updateFileDownloadStates(List<WebDAVFile> files) {
         for (WebDAVFile file : files) {
             if (!file.isCollection()) {
-                if (cacheManager.isDownloaded(file.getHref())) {
+                if (cacheManager.isDownloaded(file.getCacheKey())) {
                     file.setDownloadState(WebDAVFile.DownloadState.DOWNLOADED);
-                    file.setLocalPath(cacheManager.getLocalFile(file.getHref()).getAbsolutePath());
+                    file.setLocalPath(cacheManager.getLocalFile(file.getCacheKey()).getAbsolutePath());
                 } else {
                     file.setDownloadState(WebDAVFile.DownloadState.NOT_DOWNLOADED);
                 }
@@ -671,11 +801,26 @@ public class MainActivity extends AppCompatActivity implements
     }
     
     private void updatePathDisplay() {
-        pathTextView.setText(currentPath);
-        
-        // 更新返回按钮状态
+        // 根目录显示「服务器」，进去后显示「别名: /路径」，让用户随时知道
+        // 自己正处在哪台服务器上（多服务器下这个信息很关键）
+        if (currentServer == null) {
+            pathTextView.setText(getString(R.string.label_server_root));
+        } else {
+            pathTextView.setText(currentServer.getDisplayName() + ": " + currentPath);
+        }
+
+        // 更新返回按钮状态：根目录时隐藏
         View backButton = findViewById(R.id.backButton);
-        backButton.setVisibility(currentPath.equals("/") ? View.GONE : View.VISIBLE);
+        backButton.setVisibility(currentServer == null ? View.GONE : View.VISIBLE);
+    }
+
+    /** 按 id 找服务器配置 */
+    private ServerProfile findServerById(String serverId) {
+        if (serverId == null) return null;
+        for (ServerProfile p : ServerStore.list(this)) {
+            if (serverId.equals(p.getId())) return p;
+        }
+        return null;
     }
     
     @Override
@@ -697,6 +842,13 @@ public class MainActivity extends AppCompatActivity implements
         }
 
         boolean hasContent = fileListAdapter.getItemCount() > 0;
+        // 【根目录 = 服务器列表】根目录没有远端内容可刷，只是重新读一遍
+        // 本地服务器清单（可能刚在管理页加/删/改过）
+        if (currentServer == null) {
+            showServerRoot();
+            toast("已刷新服务器列表", Toast.LENGTH_SHORT);
+            return;
+        }
         // 刷新也走新的 token：如果用户在刷新过程中切换了目录，
         // 刷新的结果不应覆盖新目录的内容
         final int token = ++loadToken;
@@ -711,7 +863,7 @@ public class MainActivity extends AppCompatActivity implements
         } else if (file.isAudio()) {
             // 离线模式下，未下载的歌曲无法播放 —— 提前给明确提示，
             // 而不是让 MediaPlayer 抛一个含糊的错误
-            if (isOfflineMode && !cacheManager.isDownloaded(file.getHref())) {
+            if (isOfflineMode && !cacheManager.isDownloaded(file.getCacheKey())) {
                 toast("离线模式：该歌曲未下载，无法播放\n联网后可播放或先下载",
                         Toast.LENGTH_LONG);
                 return;
@@ -739,6 +891,18 @@ public class MainActivity extends AppCompatActivity implements
     }
     
     private void navigateToFolder(WebDAVFile folder) {
+        // 【服务器即根目录】在根目录点一个「文件夹」，就是进入那台服务器
+        if (currentServer == null) {
+            ServerProfile target = findServerById(folder.getServerId());
+            if (target == null) {
+                toast("该服务器已被删除，请先在服务器管理里重新添加");
+                loadCurrentPath();
+                return;
+            }
+            enterServer(target);
+            return;
+        }
+
         // 保存当前路径到栈，供返回时恢复
         pathStack.add(currentPath);
 
@@ -769,8 +933,16 @@ public class MainActivity extends AppCompatActivity implements
     
     private void navigateUp() {
         if (rlog != null) {
-            rlog.i(TAG, "返回上级: 当前=" + currentPath + " stack=" + pathStack);
+            rlog.i(TAG, "返回上级: 当前服务器=" + (currentServer == null ? "根目录" : currentServer.getDisplayName())
+                    + " 当前路径=" + currentPath + " stack=" + pathStack);
         }
+
+        // 【服务器即根目录】已在服务器根目录时，返回上级 = 回到服务器列表
+        if (currentServer != null && pathStack.isEmpty()) {
+            exitToServerRoot();
+            return;
+        }
+
         if (pathStack.isEmpty()) {
             if (!currentPath.equals("/")) {
                 // 回到根目录
@@ -829,13 +1001,18 @@ public class MainActivity extends AppCompatActivity implements
         file.setDownloadState(WebDAVFile.DownloadState.DOWNLOADING);
         fileListAdapter.updateFile(file);
         
-        // 获取本地存储路径
-        File destFile = cacheManager.getDownloadDestination(file.getHref());
-        
+        // 获取本地存储路径。
+        // 【多服务器】用 getCacheKey()（含服务器 id）命名，两台服务器
+        // 存在同名路径时不会互相覆盖本地文件。
+        File destFile = cacheManager.getDownloadDestination(file.getCacheKey());
+
         showLoading("正在下载: " + file.getDisplayName());
-        
+
+        // 【多服务器】下载请求发往该条目所属的服务器
+        final WebDAVClient dlClient = clientFor(findServerById(file.getServerId()));
+
         executorService.execute(() -> {
-            webDAVClient.download(file, destFile, new WebDAVClient.ProgressCallback() {
+            dlClient.download(file, destFile, new WebDAVClient.ProgressCallback() {
                 @Override
                 public void onProgress(int progress) {
                     // 可以在这里更新进度条
@@ -848,7 +1025,7 @@ public class MainActivity extends AppCompatActivity implements
                         dismissLoading();
                         
                         // 标记文件已下载
-                        cacheManager.markFileDownloaded(file.getHref(), destFile);
+                        cacheManager.markFileDownloaded(file.getCacheKey(), destFile);
                         // 同时写入离线索引：离线模式需要按目录列举已下载歌曲，
                         // 仅靠 downloadMap 无法还原目录结构与显示名
                         cacheManager.indexOfflineFile(file.getHref(),
@@ -956,8 +1133,12 @@ public class MainActivity extends AppCompatActivity implements
             toast("离线模式下无法上传，请先连接网络", Toast.LENGTH_SHORT);
             return;
         }
-        if (!webDAVClient.isConfigured()) {
-            toast("请先配置 WebDAV 服务器", Toast.LENGTH_SHORT);
+        if (currentServer == null) {
+            toast("请先进入某个服务器再上传", Toast.LENGTH_SHORT);
+            return;
+        }
+        if (!currentServer.isComplete()) {
+            toast("当前服务器配置不完整，请先在服务器管理里补全", Toast.LENGTH_SHORT);
             return;
         }
 
@@ -1018,7 +1199,9 @@ public class MainActivity extends AppCompatActivity implements
                         new java.util.concurrent.CountDownLatch(1);
                 final Exception[] err = new Exception[1];
 
-                webDAVClient.upload(toUpload, remotePath,
+                // 【多服务器】上传发往当前浏览的服务器
+                final WebDAVClient upClient = clientFor(currentServer);
+                upClient.upload(toUpload, remotePath,
                         new WebDAVClient.ProgressCallback() {
                             @Override
                             public void onProgress(int progress) {
@@ -1319,14 +1502,24 @@ public class MainActivity extends AppCompatActivity implements
         int id = item.getItemId();
         
         if (id == R.id.menu_locate_current) {
-            // 新增：定位到当前正在播放的歌曲
+            // 定位到当前正在播放的歌曲。
+            // 停留在服务器根目录时该功能无意义（那里列的是服务器不是曲目），
+            // 直接给出提示而不是静默什么都不做。
+            if (currentServer == null) {
+                toast("请先进入某个服务器再定位", Toast.LENGTH_SHORT);
+                return true;
+            }
             locateCurrentTrack();
+            return true;
+        } else if (id == R.id.menu_manage_servers) {
+            // 「WebDAV 服务器管理」：新增/删除/编辑服务器（别名唯一）
+            serverManageLauncher.launch(new Intent(this, ServerManageActivity.class));
             return true;
         } else if (id == R.id.menu_settings) {
             // 改为进入「WebDAV 服务器管理」页（新增/删除/切换服务器）。
             // 旧行为是跳 ServerConfigActivity，而它在已配置时会立刻 finish 回主界面，
             // 等于菜单点了没反应；服务器管理才是这里真正该去的地方。
-            startActivity(new Intent(this, ServerManageActivity.class));
+            serverManageLauncher.launch(new Intent(this, ServerManageActivity.class));
             return true;
         } else if (id == R.id.menu_refresh) {
             onRefresh();
@@ -1613,13 +1806,11 @@ public class MainActivity extends AppCompatActivity implements
         super.onResume();
         if (rlog != null) rlog.i(TAG, ">>> onResume（回到前台）");
 
-        // 【多服务器】从「服务器管理」页回来后，活动服务器可能已经被切换。
-        // 这一步必须排在其它逻辑之前：数据源、认证头、以及所有按「路径」存的
-        // 缓存都得换成新服务器的，否则会拿旧 baseUrl 去请求、或命中旧服务器的
-        // 目录快照（表现为"切了服务器却还是老内容"）。
-        if (applyActiveServerIfChanged()) {
-            return;   // 已切换完毕并在内部完成了重载
-        }
+        // 【多服务器 / 服务器即根目录】不再需要「回来检测活动服务器是否变了」：
+        // 每台服务器就是根目录里的一个条目，进入哪台看 currentServer，
+        // 缓存键也带服务器 id，所以不存在「切了服务器界面还在用旧地址」。
+        // 此处只需处理：当前浏览的服务器被删掉了 / 列表被改过。
+        syncServerListState();
 
         // 回到前台时检查网络是否已恢复。
         // 之前 isOfflineMode 是单向开关，联网后没人复位，导致永远停在
@@ -1684,13 +1875,38 @@ public class MainActivity extends AppCompatActivity implements
             }
             toast(getString(R.string.msg_located_track, current.getDisplayName()));
         } else {
-            // 未命中：提示它所在的目录
-            String dir = trackDirectoryOf(current);
+            // 未命中：提示它所在的完整路径（含文件名 + 服务器别名）
+            String full = trackFullPath(current);
             if (rlog != null) {
-                rlog.i(TAG, "当前歌曲不在本目录(" + currentPath + ")，所在目录=" + dir);
+                rlog.i(TAG, "当前歌曲不在本目录(" + currentPath + ")，完整路径=" + full);
             }
-            toast(getString(R.string.msg_track_in_other_dir, dir), Toast.LENGTH_LONG);
+            toast(getString(R.string.msg_track_in_other_dir, full), Toast.LENGTH_LONG);
         }
+    }
+
+    /**
+     * 反查正在播放歌曲所在的「完整路径」——目录 + 文件名。
+     *
+     * 为什么要带文件名：同一目录下常有多首，只报目录用户还得自己找；
+     * 直接给出「/cmcc/music/国语/男/其他/陈小春-0932.m4a」可以一眼定位。
+     * 多服务器下再带上服务器别名，免得两台服务器路径相同时分不清。
+     */
+    private String trackFullPath(WebDAVFile track) {
+        String dir = trackDirectoryOf(track);
+        String name = track.getDisplayName();
+        String path;
+        if (name == null || name.isEmpty()) {
+            path = dir;
+        } else if (dir.endsWith("/")) {
+            path = dir + name;
+        } else {
+            path = dir + "/" + name;
+        }
+        String serverName = track.getServerName();
+        if (serverName != null && !serverName.isEmpty()) {
+            return serverName + ": " + path;
+        }
+        return path;
     }
 
     /**
@@ -1722,78 +1938,53 @@ public class MainActivity extends AppCompatActivity implements
         return "/";
     }
 
-    // ==================== 新功能②：WebDAV 服务器切换生效 ====================
+    // ==================== 新功能②：多服务器（服务器即根目录） ====================
 
     /**
-     * 检查活动服务器是否被改过；变了就重建数据源、清缓存、重载当前目录。
+     * 从「服务器管理」页回来后，把主界面对齐到最新的服务器清单。
      *
-     * @return true 表示「已切换并处理完毕」，调用方可直接 return
+     * 在「服务器即根目录」的模型下，这里【只需要处理两种情况】——
+     * 旧实现在这里要重建数据源、换认证头、清空播放状态、清目录缓存、
+     * 清快照，那五项在服务器成为根目录第一层之后全都不需要了：
+     *   · 请求按条目自带的 serverId 发往对应服务器 → 无需「换数据源」
+     *   · 播放队列里的条目自带服务器归属 → 无需清空播放状态
+     *   · 缓存键含服务器 id → 两台服务器同名目录不会串，无需清缓存
      */
-    private boolean applyActiveServerIfChanged() {
-        // 初始化尚未完成时不做判断，交给正常流程
-        if (musicPlayer == null || webDAVClient == null || cacheManager == null) {
-            return false;
+    private void syncServerListState() {
+        if (musicPlayer == null || cacheManager == null) return;
+
+        List<ServerProfile> servers = ServerStore.list(this);
+
+        // 情况一：服务器被删光了 → 回管理页添加
+        if (servers.isEmpty()) {
+            if (rlog != null) rlog.w(TAG, "服务器已全部删除，回管理页");
+            currentServer = null;
+            showServerRoot();
+            toast("服务器已全部删除，请重新添加", Toast.LENGTH_LONG);
+            serverManageLauncher.launch(new Intent(this, ServerManageActivity.class));
+            return;
         }
 
-        ServerProfile active = ServerStore.getActive(this);
-        String activeId = (active != null) ? active.getId() : null;
-
-        if (activeId == null) {
-            // 服务器被删光了：回配置页重建
-            if (rlog != null) rlog.w(TAG, "活动服务器为空（已全部删除），回到服务器配置页");
-            toast("服务器已全部删除，请重新配置", Toast.LENGTH_LONG);
-            startActivity(new Intent(this, ServerConfigActivity.class));
-            finish();
-            return true;
+        // 情况二：正在浏览的那台被删掉了 → 退回根目录
+        if (currentServer != null) {
+            ServerProfile still = findServerById(currentServer.getId());
+            if (still == null) {
+                if (rlog != null) {
+                    rlog.w(TAG, "正在浏览的服务器已被删除，退回根目录: " + currentServer.getDisplayName());
+                }
+                toast("正在浏览的服务器已被删除，已回到服务器列表", Toast.LENGTH_LONG);
+                exitToServerRoot();
+                return;
+            }
         }
 
-        if (activeId.equals(appliedServerId)) {
-            return false;   // 没变，走正常流程
+        // 情况三：在根目录 → 刷新列表（可能有新增/删除/改名）
+        if (currentServer == null) {
+            showServerRoot();
         }
-        if (!active.isComplete()) {
-            if (rlog != null) rlog.w(TAG, "活动服务器配置不完整，忽略本次切换: " + active.getDisplayName());
-            return false;
-        }
-
-        if (rlog != null) {
-            rlog.i(TAG, "检测到服务器切换 -> " + active.getDisplayName() + " (" + active.getUrl() + ")");
-        }
-        appliedServerId = activeId;
-
-        // ① 数据源：WebDAVClient 的 baseUrl 与认证头换成新服务器的
-        webDAVClient.configure(active.getUrl(), active.getUsername(), active.getPassword());
-
-        // ①' 缓存层也要知道换了服务器：本地副本按服务器归属判定
-        cacheManager.setCurrentServerId(activeId);
-
-        // ② 播放器的流式请求认证头必须跟着换，否则拉流会 401
-        musicPlayer.setAuthHeaders(buildAuthHeaders(active.getUsername(), active.getPassword()));
-
-        // ③ 播放状态整体清空。
-        //    旧播放列表里的 WebDAVFile 属于旧服务器，留着会出现
-        //    「点下一首跳到另一台服务器的歌」、迷你播放器指着不存在的曲目。
-        musicPlayer.clearForServerSwitch();
-
-        // ④ 清掉所有按「路径」存的缓存。
-        //    两台服务器路径同名（例如都以 /dav/ 为根、目录结构也一样）时，
-        //    旧目录快照会被当成新服务器的目录内容 —— 必须清干净。
-        clearDirCache();
-        cacheManager.clearSnapshots();
-
-        // ⑤ 导航状态回到根目录并重新加载
-        pathStack.clear();
-        currentPath = "/";
-        if (fileListAdapter != null) {
-            fileListAdapter.setFiles(new ArrayList<>());
-            fileListAdapter.setPlayingHref(null);
-        }
-        syncUiWithPlayer();
-        loadCurrentPath();
-        toast("已切换到：" + active.getDisplayName());
-        return true;
     }
 
-    /** 清空「目录内存缓存」（路径 → 文件列表）。服务器切换时必须调用 */
+    /** 清空「目录内存缓存」（路径 → 文件列表）。仅在「清空缓存」时用 */
     private void clearDirCache() {
         try {
             dirCache.clear();

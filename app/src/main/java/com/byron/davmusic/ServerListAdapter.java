@@ -32,20 +32,18 @@ public class ServerListAdapter extends RecyclerView.Adapter<ServerListAdapter.Vi
     }
 
     private final List<ServerProfile> data = new ArrayList<>();
-    private String activeServerId;
     private final Listener listener;
 
     public ServerListAdapter(Listener listener) {
         this.listener = listener;
     }
 
-    /** 整体替换数据；activeServerId 用于渲染「当前使用」标记 */
-    public void setData(List<ServerProfile> servers, String activeServerId) {
+    /** 整体替换数据。服务器已无「当前使用」概念，故不再需要 activeServerId */
+    public void setData(List<ServerProfile> servers) {
         data.clear();
         if (servers != null) {
             data.addAll(servers);
         }
-        this.activeServerId = activeServerId;
         notifyDataSetChanged();
     }
 
@@ -75,8 +73,8 @@ public class ServerListAdapter extends RecyclerView.Adapter<ServerListAdapter.Vi
             h.accountText.setText("账号：" + account);
         }
 
-        boolean isActive = p.getId() != null && p.getId().equals(activeServerId);
-        h.activeBadge.setVisibility(isActive ? View.VISIBLE : View.GONE);
+        // 服务器已无「当前使用」概念：点击=进入浏览，因此不显示标记
+        h.activeBadge.setVisibility(View.GONE);
 
         h.itemView.setOnClickListener(v -> {
             if (listener != null) {
