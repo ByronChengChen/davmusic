@@ -13,6 +13,8 @@ import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
+import android.widget.Button;
+import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
@@ -447,7 +449,6 @@ public class MainActivity extends AppCompatActivity implements
             f.setServerId(p.getId());
             f.setServerName(p.getDisplayName());
             f.setRelativePath("");
-            // 用别名做二次行，显示账号便于区分同址不同账号的两台
             rows.add(f);
         }
 
@@ -459,6 +460,183 @@ public class MainActivity extends AppCompatActivity implements
         if (rlog != null) {
             rlog.i(TAG, "[根目录] 列出服务器 " + rows.size() + " 台");
         }
+    }
+
+    /**
+     * 根目录下长按一个服务器条目 = 打开它的管理菜单（编辑/删除）。
+     *
+     * 为什么在览浏层也放管理入口：用户想改服务器往往正处在根目录，
+     * 不该被迫跳进「服务器管理页」再返回。管理页仍然保留，
+     * 作为集中管理（尤其是「新增」和首次配置）的地方。
+     */
+    private void showServerItemMenu(WebDAVFile row) {
+        final ServerProfile profile = findServerById(row.getServerId());
+        if (profile == null) {
+            toast("该服务器已被删除");
+            loadCurrentPath();
+            return;
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle(profile.getDisplayName())
+                .setItems(new CharSequence[]{
+                        getString(R.string.menu_edit_server),
+                        getString(R.string.menu_delete_server),
+                }, (d, which) -> {
+                    if (which == 0) {
+                        showServerEditDialog(profile);
+                    } else {
+                        confirmDeleteServer(profile);
+                    }
+                })
+                .show();
+    }
+
+    /** 根目录内联编辑服务器（与服务器管理页共用同一套校验规则） */
+    private void showServerEditDialog(final ServerProfile existing) {
+        View view = getLayoutInflater().inflate(R.layout.dialog_server_edit, null);
+        final EditText nameInput = view.findViewById(R.id.editServerName);
+        final EditText urlInput = view.findViewById(R.id.editServerUrl);
+        final EditText userInput = view.findViewById(R.id.editServerUsername);
+        final EditText passInput = view.findViewById(R.id.editServerPassword);
+        final Button testButton = view.findViewById(R.id.btnTestConnection);
+        final TextView resultView = view.findViewById(R.id.testResultText);
+
+        nameInput.setText(existing.getName());
+        urlInput.setText(existing.getUrl());
+        userInput.setText(existing.getUsername());
+        passInput.setText(existing.getPassword());
+
+        testButton.setOnClickListener(v -> {
+            final String url = urlInput.getText().toString().trim();
+            if (url == null || !(url.startsWith("http://") || url.startsWith("https://"))) {
+                resultView.setVisibility(View.VISIBLE);
+                resultView.setText(getString(R.string.error_invalid_url));
+                resultView.setTextColor(androidx.core.content.ContextCompat.getColor(
+                        this, R.color.error));
+                return;
+            }
+            testButton.setEnabled(false);
+            resultView.setVisibility(View.VISIBLE);
+            resultView.setText(getString(R.string.msg_testing));
+            resultView.setTextColor(androidx.core.content.ContextCompat.getColor(
+                    this, R.color.text_secondary));
+
+            WebDAVClient.testConnectionWith(url,
+                    userInput.getText().toString().trim(),
+                    passInput.getText().toString(),
+                    new WebDAVClient.WebDAVCallback<Integer>() {
+                        @Override
+                        public void onSuccess(Integer code) {
+                            runOnUiThread(() -> {
+                                if (isFinishing() || isDestroyed()) return;
+                                testButton.setEnabled(true);
+                                boolean ok = code != null && code >= 200 && code < 300;
+                                resultView.setText(ok
+                                        ? getString(R.string.msg_connection_success) + "（HTTP " + code + "）"
+                                        : getString(R.string.msg_connection_http_error,
+                                                code == null ? -1 : code));
+                                resultView.setTextColor(androidx.core.content.ContextCompat.getColor(
+                                        this, ok ? R.color.network_online : R.color.error));
+                            });
+                        }
+
+                        @Override
+                        public void onError(Exception e) {
+                            runOnUiThread(() -> {
+                                if (isFinishing() || isDestroyed()) return;
+                                testButton.setEnabled(true);
+                                String detail = (e == null || e.getMessage() == null) ? "" : e.getMessage();
+                                resultView.setText(getString(R.string.msg_connection_failed) + "：" + detail);
+                                resultView.setTextColor(androidx.core.content.ContextCompat.getColor(
+                                        this, R.color.error));
+                            });
+                        }
+                    });
+        });
+
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.title_edit_server)
+                .setView(view)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.btn_save, null)
+                .create();
+        dialog.show();
+
+        // 校验不过就保持对话框打开，避免用户重敲
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String name = nameInput.getText().toString().trim();
+            String url = urlInput.getText().toString().trim();
+            String user = userInput.getText().toString().trim();
+            String pass = passInput.getText().toString();
+
+            if (name.isEmpty()) {
+                toast(getString(R.string.error_alias_required));
+                return;
+            }
+            if (ServerStore.isAliasTaken(this, name, existing)) {
+                toast(getString(R.string.error_alias_duplicate, name));
+                return;
+            }
+            if (url.isEmpty()) {
+                toast(getString(R.string.error_server_url_required));
+                return;
+            }
+            if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                toast(getString(R.string.error_invalid_url));
+                return;
+            }
+            if (user.isEmpty()) {
+                toast(getString(R.string.error_username_required));
+                return;
+            }
+            if (pass.isEmpty()) {
+                toast(getString(R.string.error_password_required));
+                return;
+            }
+
+            existing.setName(name);
+            existing.setUrl(url);
+            existing.setUsername(user);
+            existing.setPassword(pass);
+            ServerStore.update(this, existing);
+
+            dialog.dismiss();
+            toast(getString(R.string.msg_server_updated, existing.getDisplayName()));
+            // 别名可能改了，根目录要重绘；若正在浏览的就是它，标题也要更新
+            showServerRoot();
+        });
+    }
+
+    /** 根目录内联删除服务器 */
+    private void confirmDeleteServer(final ServerProfile profile) {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.title_delete_server)
+                .setMessage(getString(R.string.msg_confirm_delete_server, profile.getDisplayName()))
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.menu_delete_server, (d, w) -> {
+                    boolean wasCurrent = currentServer != null
+                            && currentServer.getId().equals(profile.getId());
+                    ServerStore.remove(this, profile.getId());
+                    if (rlog != null) {
+                        rlog.i(TAG, "已删除服务器: " + profile.getDisplayName()
+                                + "（是否为当前浏览=" + wasCurrent + "）");
+                    }
+                    List<ServerProfile> remain = ServerStore.list(this);
+                    if (remain.isEmpty()) {
+                        toast(getString(R.string.msg_deleted_last_server));
+                        showServerRoot();
+                        return;
+                    }
+                    toast(getString(R.string.msg_server_deleted,
+                            profile.getDisplayName()));
+                    if (wasCurrent) {
+                        exitToServerRoot();
+                    } else {
+                        showServerRoot();
+                    }
+                })
+                .show();
     }
 
     /**
@@ -877,6 +1055,13 @@ public class MainActivity extends AppCompatActivity implements
     
     @Override
     public void onItemLongClick(WebDAVFile file, View view) {
+        // 【服务器即根目录】根目录里的条目是「服务器」而不是文件，
+        // 长按应该打开服务器管理菜单（编辑/删除），不能走文件菜单
+        // （那个菜单是「下载/删除本地/查看详情」，对服务器毫无意义）。
+        if (currentServer == null) {
+            showServerItemMenu(file);
+            return;
+        }
         showFileContextMenu(file, view);
     }
     
@@ -1617,9 +1802,20 @@ public class MainActivity extends AppCompatActivity implements
     
     @Override
     public void onBackPressed() {
-        if (!pathStack.isEmpty()) {
+        // 【服务器即根目录】返回键的层级：子目录 → 服务器根目录 → 服务器列表 → 退出。
+        //
+        // 原来的判断只看了 pathStack，在「已进入服务器、停在它的根目录」时
+        // pathStack 恰好是空的（没有上级目录），于是直接走了 super.onBackPressed()
+        // 退出 App —— 等于跳过了「服务器列表」这一层。这里补上 currentServer 判断，
+        // 与 navigateUp() 的分支保持一致。
+        if (pathStack != null && !pathStack.isEmpty()) {
+            // 在子目录里：退到上一级目录
             navigateUp();
+        } else if (currentServer != null) {
+            // 在某个服务器的根目录：退回服务器列表（而不是退出 App）
+            exitToServerRoot();
         } else {
+            // 已在服务器列表：正常退出
             super.onBackPressed();
         }
     }

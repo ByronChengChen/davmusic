@@ -164,6 +164,38 @@ public class ServerStore {
         Log.i(TAG, "删除服务器: " + removed.getDisplayName() + " 剩 " + all.size() + " 台");
     }
 
+    // ==================== 别名唯一性 ====================
+
+    /**
+     * 别名是否已被别的服务器占用。
+     *
+     * 服务器是根目录的第一层，别名就是「文件夹名」，必须唯一：
+     * 重名会让用户在根目录里分不清哪台是哪台，也会让
+     * 「定位到当前歌曲」提示的服务器名产生歧义。
+     *
+     * 放在 ServerStore 而非某个界面里，是因为「服务器管理页」和
+     * 「根目录的编辑对话框」都要用同一套判断，避免两处规则走偏。
+     *
+     * @param self 编辑场景传入被编辑的那台，比较时跳过它自己
+     *             （否则改个地址、别名不动就会被自己挡住）
+     */
+    public static boolean isAliasTaken(Context context, String alias, ServerProfile self) {
+        if (alias == null || alias.trim().isEmpty()) return false;
+        String target = alias.trim().toLowerCase(java.util.Locale.US);
+        String selfId = (self != null) ? self.getId() : null;
+
+        for (ServerProfile p : list(context)) {
+            if (selfId != null && selfId.equals(p.getId())) continue;   // 跳过自己
+            String other = p.getName();
+            if (other == null) continue;
+            // 忽略大小写与首尾空格：「A盘」和「a盘」看起来是同一个名字
+            if (other.trim().toLowerCase(java.util.Locale.US).equals(target)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // ==================== 内部 ====================
 
     /** 读列表；首次调用时把旧版单服务器配置迁移成列表里的第一台 */

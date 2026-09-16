@@ -1,5 +1,6 @@
 package com.byron.davmusic;
 
+import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
 import android.text.TextUtils;
@@ -25,21 +26,19 @@ import java.util.UUID;
 /**
  * WebDAV 服务器管理页。
  *
- * 能力：
- *   · 列出全部已保存的 WebDAV 服务器，标出「当前使用」的那台
- *   · 新增一台（对话框：名称/地址/账号/密码 + 测试连接）
- *   · 删除一台（删除活动服务器时自动把活动指针挪到剩下的第一台；
- *     删完最后一台则回到首次配置页）
- *   · 点击列表项 = 切换到该服务器 （这一条是「A 服务器播完切到 B 服务器」
- *     需求的入口：切换动作本身在这里只改持久化指针，真正重建客户端、
- *     清缓存、停播放由 MainActivity.onResume 统一执行，避免两处各改一半）
- *
- * 本页只负责「改配置」，不直接触碰 WebDAVClient 单例 —— 否则会出现在本页
- * 切了服务器、返回主界面却还在用旧地址的两套状态问题。
+ * 与「服务器列表」（根目录）的关系：
+ *   · 根目录的服务器列表是【浏览】层级 —— 点一台就进去浏览它的目录树，
+ *     返回键按「子目录 → 服务器根目录 → 服务器列表 → 退出」逐层退回。
+ *   · 本页是【配置】层级 —— 只做增删改，浏览时不经过这里，避免把
+ *     「返回」变成「浏览跳设置」的层级错位。
+ * 两处都能改配置（根目录长按可编辑、可删除），本页则是集中管理的地方。
  */
 public class ServerManageActivity extends AppCompatActivity implements ServerListAdapter.Listener {
 
     private static final String TAG = "ServerManage";
+
+    /** 主界面从结果里读这个 key，拿到要进入的服务器 id */
+    public static final String EXTRA_ENTER_SERVER_ID = "enter_server_id";
 
     private RecyclerView recyclerView;
     private ServerListAdapter adapter;
@@ -83,8 +82,7 @@ public class ServerManageActivity extends AppCompatActivity implements ServerLis
     private void refresh() {
         List<ServerProfile> servers = ServerStore.list(this);
         // 【服务器即根目录】没有「当前使用的服务器」这个概念了 ——
-        // 每台都是根目录里的一个条目，进入哪台看主界面的选择。
-        // 因此列表不再渲染「当前使用」标记。
+        // 哪台在用取决于用户进到哪个服务器的目录树，因此列表不渲染「当前使用」标记。
         adapter.setData(servers);
 
         boolean empty = servers.isEmpty();
@@ -98,11 +96,9 @@ public class ServerManageActivity extends AppCompatActivity implements ServerLis
 
     // ==================== 列表交互 ====================
 
-    /** 移到根目录顶部：点它=进入该服务器浏览 */
+    /** 点击列表项 = 进入该服务器浏览（回传 id 给主界面） */
     @Override
     public void onSwitch(ServerProfile profile) {
-        // 【服务器即根目录】这里的「点击」语义已从「设为当前服务器」变为
-        // 「进入这台服务器浏览」—— 用 setResult 带回 id，主界面据此进入。
         if (profile == null) return;
         if (!profile.isComplete()) {
             toast(getString(R.string.msg_server_incomplete));
@@ -115,9 +111,6 @@ public class ServerManageActivity extends AppCompatActivity implements ServerLis
         setResult(RESULT_OK, data);
         finish();
     }
-
-    /** 主界面从结果里读这个 key，拿到要进入的服务器 id */
-    public static final String EXTRA_ENTER_SERVER_ID = "enter_server_id";
 
     @Override
     public void onEdit(ServerProfile profile) {
@@ -250,7 +243,7 @@ public class ServerManageActivity extends AppCompatActivity implements ServerLis
             toast(getString(R.string.error_alias_required));
             return null;
         }
-        if (isAliasTaken(name, existing)) {
+        if (ServerStore.isAliasTaken(this, name, existing)) {
             toast(getString(R.string.error_alias_duplicate, name));
             return null;
         }
@@ -291,29 +284,6 @@ public class ServerManageActivity extends AppCompatActivity implements ServerLis
             toast(getString(R.string.msg_server_updated, p.getDisplayName()));
         }
         return p;
-    }
-
-    /**
-     * 别名是否已被别的服务器占用。
-     *
-     * 编辑场景要排除「自己」：否则改一下地址、别名不动就会被自己挡住。
-     * 比较时忽略大小写与首尾空格 —— 「A盘」和「a盘」在列表里看起来是
-     * 同一个名字，允许同时存在只会让用户困惑。
-     */
-    private boolean isAliasTaken(String alias, ServerProfile self) {
-        if (alias == null) return false;
-        String target = alias.trim().toLowerCase(java.util.Locale.US);
-        String selfId = (self != null) ? self.getId() : null;
-
-        for (ServerProfile p : ServerStore.list(this)) {
-            if (selfId != null && selfId.equals(p.getId())) continue;   // 跳过自己
-            String other = p.getName();
-            if (other == null) continue;
-            if (other.trim().toLowerCase(java.util.Locale.US).equals(target)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private void showTestResult(TextView tv, String text, Boolean ok) {
