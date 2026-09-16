@@ -383,6 +383,15 @@ public class MusicPlayer {
     }
 
     /**
+     * 当前这一首拉流使用的认证头。
+     *
+     * 【多服务器】播放队列可能跨服务器，因此这份凭据在每次 playFile 时
+     * 由 applyAuthHeadersFor() 按「这一首所属的服务器」刷新；
+     * authHeadersFor() 负责按条目计算，两者分工明确。
+     */
+    private Map<String, String> authHeaders;
+
+    /**
      * 取某个条目所属服务器的认证头。
      *
      * 【多服务器】不能再用一个全局 authHeaders —— 播放队列可能跨服务器，
@@ -464,13 +473,11 @@ public class MusicPlayer {
                 }
                 mp.setDataSource(file.getAbsolutePath());
             } else {
-                // 在线播放
+                // 在线播放：带上「这一首所属服务器」的认证头。
+                // authHeaders 已由 playFile → applyAuthHeadersFor() 按条目刷新。
                 Uri uri = Uri.parse(url);
-                if (authHeaders != null && !authHeaders.isEmpty()) {
-                    // 有认证头的情况
-                    Map<String, String> headers = new HashMap<>();
-                    headers.put("Authorization", authHeaders.get("Authorization"));
-                    mp.setDataSource(context, uri, headers);
+                if (authHeaders != null && authHeaders.get("Authorization") != null) {
+                    mp.setDataSource(context, uri, authHeaders);
                 } else {
                     // 无认证头的情况
                     mp.setDataSource(context, uri);
