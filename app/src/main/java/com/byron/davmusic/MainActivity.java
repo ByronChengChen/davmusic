@@ -536,8 +536,11 @@ public class MainActivity extends AppCompatActivity implements
                                         ? getString(R.string.msg_connection_success) + "（HTTP " + code + "）"
                                         : getString(R.string.msg_connection_http_error,
                                                 code == null ? -1 : code));
+                                // 注意用 MainActivity.this：这里在匿名回调内部，
+                                // 写 this 指的是 WebDAVCallback 而非 Activity
                                 resultView.setTextColor(androidx.core.content.ContextCompat.getColor(
-                                        this, ok ? R.color.network_online : R.color.error));
+                                        MainActivity.this,
+                                        ok ? R.color.network_online : R.color.error));
                             });
                         }
 
@@ -549,7 +552,7 @@ public class MainActivity extends AppCompatActivity implements
                                 String detail = (e == null || e.getMessage() == null) ? "" : e.getMessage();
                                 resultView.setText(getString(R.string.msg_connection_failed) + "：" + detail);
                                 resultView.setTextColor(androidx.core.content.ContextCompat.getColor(
-                                        this, R.color.error));
+                                        MainActivity.this, R.color.error));
                             });
                         }
                     });
