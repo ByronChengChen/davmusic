@@ -626,6 +626,17 @@ public class WebDAVClient {
 
         NodeList responses = doc.getElementsByTagNameNS("DAV:", "response");
 
+        // 空的 multistatus 是【畸形响应】，不是「空目录」。
+        // 合规的 WebDAV 服务器至少会返回目录自身那一条 <response>，
+        // 所以 0 条说明响应不完整（网关截断、协议不符等）。
+        // 这里主动抛异常，让它走 onError 分支 —— 否则空列表会被上层当成
+        // 「这个目录是空的」缓存下来，把真实内容遮住。
+        // 反过来说：能走到下面的空列表，就是「目录确实为空」的可信结论，
+        // 上层可以放心缓存（见 MainActivity 的空目录缓存处理）。
+        if (responses.getLength() == 0) {
+            throw new Exception("PROPFIND 响应缺少 <response> 元素，视为畸形响应");
+        }
+
         for (int i = 0; i < responses.getLength(); i++) {
             Element response = (Element) responses.item(i);
 

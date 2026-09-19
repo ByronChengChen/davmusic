@@ -120,18 +120,34 @@ public class MainActivity extends AppCompatActivity implements
     /** 路径 → 写入缓存的时间戳 */
     private final Map<String, Long> dirCacheTime = new HashMap<>();
 
-    /** 写入内存缓存 */
+    /**
+     * 写入内存缓存。
+     *
+     * 空列表也要缓存 —— 「这个目录是空的」同样是一个有效事实，缓存它才能
+     * 让重复进入不产生请求。早期实现把空列表当成「没有内容」直接跳过，
+     * 导致空目录永远命中不了缓存，每次进入都重新 PROPFIND
+     * （真机实测：AI工具箱 21 次进入 = 21 次请求，0 次缓存写入）。
+     *
+     * 之所以现在能安全地缓存空列表：畸形响应已在
+     * WebDAVClient.parsePropfindResponse 里被拦成 onError，
+     * 所以能走到这里的空列表就是「目录确实为空」。
+     */
     private void putDirCache(String path, List<WebDAVFile> files) {
-        if (path == null || files == null || files.isEmpty()) return;
+        if (path == null || files == null) return;
         dirCache.put(path, new ArrayList<>(files));
         dirCacheTime.put(path, System.currentTimeMillis());
         if (rlog != null) rlog.i(TAG, "[内存缓存] 写入 " + path + " (" + files.size() + " 项)");
     }
 
-    /** 读取内存缓存；未命中返回 null */
+    /**
+     * 读取内存缓存；未命中返回 null。
+     *
+     * 注意：空列表是【有效命中】，不能当成未命中返回 null，
+     * 否则空目录的缓存写了也读不到。
+     */
     private List<WebDAVFile> getDirCache(String path) {
         List<WebDAVFile> cached = dirCache.get(path);
-        if (cached == null || cached.isEmpty()) return null;
+        if (cached == null) return null;
         return new ArrayList<>(cached);
     }
 
@@ -740,7 +756,9 @@ public class MainActivity extends AppCompatActivity implements
         // 未命中内存缓存：走原有逻辑（磁盘快照先渲染 + 网络请求）
         boolean rendered = false;
         List<WebDAVFile> cached = cacheManager.loadSnapshot(cacheKey);
-        if (cached != null && !cached.isEmpty()) {
+        // cached == null 表示「没有快照」；空列表表示「快照存在且目录为空」——
+        // 两者必须区分：前者要弹 loading 去拉，后者是有效命中，直接静默刷新即可
+        if (cached != null) {
             updateFileDownloadStates(cached);
             fileListAdapter.setFiles(cached);
             fileListAdapter.setOfflineMode(false);
@@ -882,16 +900,23 @@ public class MainActivity extends AppCompatActivity implements
                     // 更新文件的下载状态
                     updateFileDownloadStates(files);
 
-                    // 只有拿到内容才覆盖快照 —— 避免一次空响应用空列表
-                    // 把之前缓存好的目录数据抹掉。
+                    // 空列表也写快照 —— 「这个目录是空的」是有效事实，必须缓存，
+                    // 否则每次进入都会重新 PROPFIND（真机实测：AI工具箱 21 次
+                    // 进入 = 21 次请求，0 次缓存写入）。
                     //
-                    // 必须用 requestPath 而非 currentPath：快照的 key 表示
+                    // 早期实现写的是 `!files.isEmpty()`，理由是「避免一次空响应
+                    // 把之前缓存好的目录数据抹掉」。这个担心现在由
+                    // WebDAVClient.parsePropfindResponse 承担：0 条 <response>
+                    // 的畸形响应会抛异常走 onError，根本到不了这里。
+                    // 所以此处的空列表只可能是「服务端明确回答目录为空」。
+                    //
+                    // 必须用 cacheKey 而非 currentPath：快照的 key 表示
                     // "这份数据属于哪个目录"。若用 currentPath，当用户已切到
                     // 别的目录、而这个旧请求恰好通过校验（边界情况）时，
                     // 会把 A 目录的内容写进 B 目录的快照，导致内容错乱与闪烁。
                     //
                     // cacheKey 里含服务器 id，两台服务器同名目录互不覆盖。
-                    if (files != null && !files.isEmpty()) {
+                    if (files != null) {
                         cacheManager.saveSnapshot(cacheKey, files);
                         // 同步写入内存缓存，后续"返回上级"可零请求命中
                         putDirCache(cacheKey, files);
