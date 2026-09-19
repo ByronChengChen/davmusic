@@ -39,6 +39,9 @@ public class LocalCacheManager {
         this.context = context.getApplicationContext();
         this.preferences = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
         loadDownloadMap();
+        // 旧版本快照曾存放在 cacheDir 下，升级后搬到持久目录；
+        // 旧目录一旦迁移干净即被删除，之后这里只是一次负向 exists() 检查
+        migrateLegacySnapshotsIfNeeded();
     }
 
     public static synchronized LocalCacheManager getInstance(Context context) {
@@ -471,9 +474,102 @@ public class LocalCacheManager {
         return new File(externalFilesDir, DOWNLOAD_DIR);
     }
 
+    /**
+     * 快照存储目录：应用私有持久目录 filesDir/snapshots。
+     *
+     * 早期版本放在 getCacheDir() 下，但 cacheDir 是系统可随时清理的目录
+     * （存储紧张时 Android 会自行删除，且不通知应用），导致用户离线时
+     * 曾经浏览过的目录快照无声消失、离线列表变空。
+     *
+     * 快照是本应用离线能力的唯一数据来源，且体积很小（每个目录一份 JSON
+     * 元数据，不含音频本体），因此移到 filesDir 长期保留。
+     *
+     * 注：备份规则只 include sharedpref 域，files/ 不参与云备份与设备迁移，
+     * 所以迁移不会把快照带进备份包。
+     */
     private File getSnapshotDirectory() {
-        File cacheDir = context.getCacheDir();
-        return new File(cacheDir, SNAPSHOT_DIR);
+        return new File(context.getFilesDir(), SNAPSHOT_DIR);
+    }
+
+    /** 迁移前的旧快照目录（cacheDir/snapshots），仅用于一次性数据迁移 */
+    private File getLegacySnapshotDirectory() {
+        return new File(context.getCacheDir(), SNAPSHOT_DIR);
+    }
+
+    /**
+     * 把旧版本遗留在 cacheDir 下的快照迁移到持久目录。
+     *
+     * 不设「已迁移」标志位：旧目录迁移干净后会被整体删除，之后的启动只是
+     * 一次负向 exists() 检查，成本可忽略；这样也不存在标志位与实际文件
+     * 状态不一致的可能（标志位说迁移过了、文件却没搬成）。
+     */
+    private void migrateLegacySnapshotsIfNeeded() {
+        try {
+            File legacy = getLegacySnapshotDirectory();
+            if (!legacy.exists() || !legacy.isDirectory()) return;
+
+            File[] files = legacy.listFiles();
+            if (files == null || files.length == 0) {
+                legacy.delete();
+                return;
+            }
+
+            File target = getSnapshotDirectory();
+            if (!target.exists() && !target.mkdirs()) {
+                Log.w(TAG, "快照迁移失败：无法创建目标目录 " + target.getAbsolutePath());
+                return;
+            }
+
+            int moved = 0;
+            int failed = 0;
+            for (File src : files) {
+                if (src == null || !src.isFile()) continue;
+
+                File dest = new File(target, src.getName());
+                if (dest.exists() && dest.isFile()) {
+                    // 目标已有同名快照，说明升级后已重新写入过，以新的为准。
+                    // 必须是普通文件：若该名字被目录占用，走下面分支计为失败，
+                    // 保留源文件下次重试，绝不在这里删源
+                    if (src.delete()) moved++; else failed++;
+                    continue;
+                }
+                if (src.renameTo(dest)) {
+                    moved++;
+                } else if (copyFile(src, dest)) {
+                    if (src.delete()) moved++; else failed++;
+                } else {
+                    failed++;
+                }
+            }
+
+            // 仅当全部迁移成功才移除旧目录：有残留就保留，下次启动重试，
+            // 避免残留文件随后被系统清理时无声丢失
+            if (failed == 0) {
+                legacy.delete();
+            }
+            Log.d(TAG, "快照迁移：成功 " + moved + " 个，失败 " + failed + " 个");
+        } catch (Exception e) {
+            Log.e(TAG, "快照迁移异常", e);
+        }
+    }
+
+    /** renameTo 失败时的兜底：复制字节流（失败则清掉半成品，不留损坏文件） */
+    private boolean copyFile(File src, File dest) {
+        try (InputStream in = new FileInputStream(src);
+             OutputStream out = new FileOutputStream(dest)) {
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) != -1) {
+                out.write(buf, 0, n);
+            }
+            out.flush();
+            return true;
+        } catch (IOException e) {
+            Log.e(TAG, "复制快照失败: " + src.getName(), e);
+            // 只清理本次可能写出的半成品文件；若该路径是目录，绝不能删
+            if (dest.isFile()) dest.delete();
+            return false;
+        }
     }
 
     /**
