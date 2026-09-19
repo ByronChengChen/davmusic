@@ -9,6 +9,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.InputType;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -1721,6 +1722,9 @@ public class MainActivity extends AppCompatActivity implements
         } else if (id == R.id.menu_upload_log) {
             uploadLogManually();
             return true;
+        } else if (id == R.id.menu_log_token) {
+            showLogTokenDialog();
+            return true;
         }
         
         return super.onOptionsItemSelected(item);
@@ -1838,16 +1842,71 @@ public class MainActivity extends AppCompatActivity implements
         }
     }
 
-    /** 手动上报日志（菜单触发），并告知本地路径便于排查 */
+    /**
+     * 手动上报日志（菜单触发）。
+     *
+     * 用回调把结果告知用户 —— 旧实现无论成功失败都只弹一句「正在上报…」，
+     * 令牌失效或设备时钟偏移时会表现成「以为传了其实没传」，正是本次改造
+     * 要消灭的静默失败。
+     */
     private void uploadLogManually() {
         if (rlog == null) {
             toast("日志组件未初始化", Toast.LENGTH_SHORT);
             return;
         }
+        if (!rlog.hasToken()) {
+            toast("未配置上报令牌\n请先「设置上报令牌」", Toast.LENGTH_LONG);
+            return;
+        }
         rlog.i(TAG, "用户手动触发日志上报");
-        rlog.upload("用户手动上报");
-        toast("正在上报日志…\n（约几秒后可在服务器查看）",
-                Toast.LENGTH_LONG);
+        toast("正在上报日志…", Toast.LENGTH_SHORT);
+        rlog.upload("用户手动上报", (ok, message) ->
+                runOnUiThread(() -> toast(
+                        ok ? "日志已上报成功" : ("上报失败：" + message),
+                        ok ? Toast.LENGTH_SHORT : Toast.LENGTH_LONG)));
+    }
+
+    /**
+     * 「设置上报令牌」对话框。
+     *
+     * 令牌只存在应用私有目录，不进源码、不进仓库、不进 APK ——
+     * 这是它相对旧方案（明文口令提交进公开仓库）的全部安全价值所在。
+     * 对话框里以掩码显示已有令牌，便于确认「配的是哪一个」而不暴露它。
+     */
+    private void showLogTokenDialog() {
+        if (rlog == null) {
+            toast("日志组件未初始化", Toast.LENGTH_SHORT);
+            return;
+        }
+
+        final EditText input = new EditText(this);
+        input.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        input.setHint("粘贴上报令牌");
+        input.setText(rlog.getToken());
+        input.setSelection(input.getText().length());
+
+        int pad = (int) (getResources().getDisplayMetrics().density * 20);
+        LinearLayout wrapper = new LinearLayout(this);
+        wrapper.setPadding(pad, pad / 2, pad, 0);
+        wrapper.addView(input);
+        input.setSingleLine(false);
+        input.setMaxLines(3);
+
+        new AlertDialog.Builder(this)
+                .setTitle("设置上报令牌")
+                .setMessage("当前：" + rlog.getMaskedToken()
+                        + "\n\n令牌保存在本机应用私有目录，不会写入源码或上传。\n"
+                        + "留空保存即清除。")
+                .setView(wrapper)
+                .setPositiveButton("保存", (d, w) -> {
+                    rlog.setToken(input.getText().toString());
+                    toast(rlog.hasToken()
+                            ? ("已保存：" + rlog.getMaskedToken())
+                            : "已清除上报令牌", Toast.LENGTH_SHORT);
+                })
+                .setNegativeButton("取消", null)
+                .show();
     }
 
     /** Android 13(T) 及以上申请通知权限；低版本无需申请 */

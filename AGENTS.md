@@ -170,10 +170,65 @@ versionName "1.30"     // 展示用
 
 ## 8. 日志回传（真机调试用）
 
-App 通过 `RemoteLogger` 把日志 POST 到服务端目录（`/davmusic-logs/`），
-经 Caddy（`:9339`）落到服务器本地 `/home/ubuntu/davmusic-logs`。
+App 通过 `RemoteLogger` 把日志 **PUT** 到服务端（`/davmusic-logs/`），
+由服务器上的 `log_sink.py`（systemd 用户服务 `davmusic-log-sink`，监听 `:9339`）
+落到本地 `/home/ubuntu/davmusic-logs`。
 
 **这是拿真机现场的手段**——出 bug 时先看这里，不要靠猜。
+
+### 🔴 鉴权：HMAC 签名，凭据绝不进仓库
+
+v1.33 起改为 HMAC-SHA256 签名，**取代早期的 Basic Auth**。原因是一次真实事故：
+旧实现把「用户名 + 口令」明文写成 `RemoteLogger.ENDPOINTS` 里的常量，
+而本仓库是公开的 —— 等于把两个收集端点的凭据一起公开了，认证形同虚设。
+
+现在的规则：
+
+- **令牌由用户在 App 内手动输入**（菜单 → 设置上报令牌），
+  存在应用私有 SharedPreferences。**不进源码、不进仓库、不进 APK。**
+- 每次上报现算签名，**令牌本身从不上线**：
+  ```
+  canonical = "PUT\n" + path + "\n" + timestamp + "\n" + nonce + "\n" + sha256hex(body)
+  signature = hex(HMAC-SHA256(key = 令牌, msg = canonical))
+  ```
+  请求头：`X-Davmusic-Timestamp` / `X-Davmusic-Nonce` /
+  `X-Davmusic-Body-Sha256` / `X-Davmusic-Signature`
+- 服务端令牌存在 `/home/ubuntu/log-sink/token.secret`（权限 600），
+  `config.json` 只存路径 —— 这样 config.json 被复制或贴出来也不带出秘密。
+- 时间窗 ±300 秒；重放靠 nonce 去重（只有验签通过的 nonce 才入表）。
+- **链路上嗅探只能拿到一次性签名**，既不能伪造新请求，也不能重放。
+
+**⛔ 不要把任何凭据写回源码。** 也不要为了「更安全」把签名逻辑挪进 .so：
+令牌不在 .so 里，算法（HMAC-SHA256）是公开标准，挪进去安全性质完全不变，
+只会引入 NDK 构建的代价，并与「纯 Java」约定冲突。
+
+### 时钟偏移 —— 这套方案最容易咬人的地方
+
+签名带时间戳，**手机时钟不准就会签名被拒**。而拒签如果被静默吞掉，
+就退化成「以为传了其实没传」——正是本机制要消灭的东西。所以：
+
+- 服务端在时钟超窗时回 `401` + `X-Davmusic-Error: clock_skew`
+- App 必须据此提示「设备时间不准」，**不能静默失败**
+- 手动上报走 `RemoteLogger.UploadCallback`，结果用 Toast 告知用户
+
+### 端口
+
+`:9339` 需要 OCI 安全列表放行（主机 iptables 已放行并持久化）。
+**未放行时 App 的表现是连接超时**，而日志目录里看不到任何写入。
+
+### 排障
+
+```bash
+# 服务状态与访问日志
+systemctl --user status davmusic-log-sink
+journalctl --user -u davmusic-log-sink -f
+
+# 鉴权自测（覆盖正常/失败/重放/时钟/白名单/配额等 27 项）
+python3 /home/ubuntu/log-sink/test_signing.py
+```
+
+`test_signing.py` 里的签名构造必须与 `RemoteLogger.java` 逐字节一致，
+改任一侧都要同步改另一侧。
 
 ---
 

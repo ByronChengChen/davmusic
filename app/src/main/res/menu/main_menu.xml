@@ -29,6 +29,11 @@
         app:showAsAction="never" />
 
     <item
+        android:id="@+id/menu_log_token"
+        android:title="设置上报令牌"
+        app:showAsAction="never" />
+
+    <item
         android:id="@+id/menu_upload_log"
         android:title="上报日志"
         app:showAsAction="never" />
