@@ -30,7 +30,8 @@ import okhttp3.Response;
  * 设计：
  *   1. 所有日志同时写入应用私有目录的滚动文件（单文件上限 ~512KB，
  *      超出后自动轮转），避免占用过多空间。
- *   2. 提供 upload() 把日志文件 POST/PUT 到远端收集端点。
+ *   2. 提供 upload() 把日志文件 PUT 到【多个】远端收集端点
+ *      （互为备份，逐个尝试，任一失败不影响其他端点）。
  *   3. 上报走独立的 OkHttpClient 与线程池，且用 try-catch 全包，
  *      任何失败都只记本地日志、绝不影响主流程。
  *
@@ -40,11 +41,38 @@ public class RemoteLogger {
 
     private static final String TAG = "RemoteLogger";
 
-    /** 日志上报端点（由服务器端 Caddy 反代到日志服务） */
-    private static final String UPLOAD_URL =
-            "https://124.223.184.150/davmusic-logs/";
-    private static final String UPLOAD_USER = "davmusic";
-    private static final String UPLOAD_PASS = "ck20181220ck";
+    /** 单个上报端点 */
+    private static final class Endpoint {
+        final String label;     // 仅用于日志区分
+        final String url;
+        final String user;
+        final String pass;
+
+        Endpoint(String label, String url, String user, String pass) {
+            this.label = label;
+            this.url = url;
+            this.user = user;
+            this.pass = pass;
+        }
+    }
+
+    /**
+     * 上报端点列表，逐个尝试。
+     *
+     * 两个端点互为备份：
+     *   · 124.223.184.150 —— 原有收集端（Caddy + Let's Encrypt IP 证书）
+     *   · 140.245.120.89  —— 本机新增的一份，便于在本地直接读日志排障
+     *
+     * 任一端点不可达只记一条本地日志，既不影响另一个端点，也不影响主流程。
+     */
+    private static final Endpoint[] ENDPOINTS = {
+            new Endpoint("124.223.184.150",
+                    "https://124.223.184.150/davmusic-logs/",
+                    "davmusic", "ck20181220ck"),
+            new Endpoint("本机",
+                    "http://140.245.120.89:9339/davmusic-logs/",
+                    "davmusic", "358FJuNQT-OZcD6s0jssUo4q_C5wveDu"),
+    };
 
     /** 单文件上限，超过则轮转为 .1 备份 */
     private static final long MAX_FILE_SIZE = 512 * 1024;
@@ -57,6 +85,12 @@ public class RemoteLogger {
     private final SimpleDateFormat fmt =
             new SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.getDefault());
     private final ExecutorService uploadExecutor = Executors.newSingleThreadExecutor();
+    /** 上报共用同一个 OkHttpClient：连接池/线程池复用，不必每次上传都新建 */
+    private final OkHttpClient uploadClient = new OkHttpClient.Builder()
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build();
 
     private RemoteLogger(Context context) {
         this.context = context.getApplicationContext();
@@ -182,32 +216,43 @@ public class RemoteLogger {
 
                 byte[] body = content.toString().getBytes("UTF-8");
 
-                OkHttpClient client = new OkHttpClient.Builder()
-                        .connectTimeout(20, TimeUnit.SECONDS)
-                        .writeTimeout(60, TimeUnit.SECONDS)
-                        .readTimeout(30, TimeUnit.SECONDS)
-                        .build();
-
-                Request request = new Request.Builder()
-                        .url(UPLOAD_URL + fileName)
-                        .put(RequestBody.create(body,
-                                MediaType.parse("text/plain; charset=utf-8")))
-                        .header("Authorization",
-                                Credentials.basic(UPLOAD_USER, UPLOAD_PASS))
-                        .build();
-
-                try (Response resp = client.newCall(request).execute()) {
-                    if (resp.isSuccessful()) {
-                        write("I", TAG, "日志已上报: " + fileName
-                                + " (" + body.length + " 字节)");
-                    } else {
-                        write("W", TAG, "日志上报失败: HTTP " + resp.code());
-                    }
+                // 逐个端点上报：互不影响，任一失败都不影响其他端点与主流程
+                for (Endpoint ep : ENDPOINTS) {
+                    uploadTo(ep, fileName, body);
                 }
             } catch (Exception ex) {
                 write("E", TAG, "日志上报异常: " + ex.getMessage());
             }
         });
+    }
+
+    /**
+     * 向单个端点上报日志。
+     *
+     * 刻意把异常吞在这里：一个端点不可达（例如云防火墙尚未放行端口）
+     * 不应该让另一个端点也收不到日志，更不应该影响主流程。
+     */
+    private void uploadTo(Endpoint ep, String fileName, byte[] body) {
+        try {
+            Request request = new Request.Builder()
+                    .url(ep.url + fileName)
+                    .put(RequestBody.create(body,
+                            MediaType.parse("text/plain; charset=utf-8")))
+                    .header("Authorization", Credentials.basic(ep.user, ep.pass))
+                    .build();
+
+            try (Response resp = uploadClient.newCall(request).execute()) {
+                if (resp.isSuccessful()) {
+                    write("I", TAG, "日志已上报 " + ep.label + ": " + fileName
+                            + " (" + body.length + " 字节)");
+                } else {
+                    write("W", TAG, "日志上报失败 " + ep.label
+                            + ": HTTP " + resp.code());
+                }
+            }
+        } catch (Exception ex) {
+            write("E", TAG, "日志上报异常 " + ep.label + ": " + ex.getMessage());
+        }
     }
 
     private String readFileSafe(File f) {
