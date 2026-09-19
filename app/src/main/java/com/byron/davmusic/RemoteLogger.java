@@ -295,6 +295,11 @@ public class RemoteLogger {
 
         uploadExecutor.execute(() -> {
             try {
+                // 记录读取时的长度：上报成功后据此精确清理，
+                // 只删「本次确实已发出」的内容（见 clearUploaded 的说明）
+                final long lenOld = logFileOld.exists() ? logFileOld.length() : 0L;
+                final long lenCur = logFile.exists() ? logFile.length() : 0L;
+
                 StringBuilder content = new StringBuilder();
                 content.append("=== davmusic 日志上报 ===\n");
                 content.append("时间: ").append(new Date()).append("\n");
@@ -312,6 +317,13 @@ public class RemoteLogger {
 
                 byte[] body = content.toString().getBytes("UTF-8");
                 String result = uploadTo(fileName, body);
+
+                // 只在成功后清理：失败（断网/令牌无效）必须保留本地日志，
+                // 否则「上传失败」会连带把唯一的副本也弄丢
+                if (result == null) {
+                    clearUploaded(lenOld, lenCur);
+                }
+
                 if (cb != null) {
                     cb.onResult(result == null, result);
                 }
@@ -322,6 +334,61 @@ public class RemoteLogger {
                 }
             }
         });
+    }
+
+    /**
+     * 上报成功后，清掉「本次确实已发出」的那部分日志。
+     *
+     * ⛔ 不能简单地删掉整个文件。读取快照（T1）到上报完成（T2）之间隔着
+     * 1–3 秒，这期间新写入的日志还没发出去；T2 直接删就会把它们永久丢掉。
+     * 而本机制要抓的「锁屏切歌失败」恰好可能发生在任意时刻 ——
+     * 在上报窗口里丢日志，等于给最需要的那段现场挖了个洞。
+     *
+     * 做法：logFileOld 整体已随本次上报发出，可删；
+     * logFile 只保留 [lenCur, 当前长度) 这段新写入的内容。
+     *
+     * @param lenOld 读取时 logFileOld 的长度
+     * @param lenCur 读取时 logFile 的长度
+     */
+    private void clearUploaded(long lenOld, long lenCur) {
+        synchronized (this) {
+            try {
+                // 上报期间若发生了轮转（logFile 被改名成 logFileOld），
+                // 文件状态已与读取时不一致，此时任何删除都可能误伤新内容。
+                // 保守起见本次不清理 —— 宁可下次多发一遍，也不冒丢日志的险。
+                if (logFileOld.exists() && logFileOld.length() != lenOld) {
+                    Log.i(TAG, "上报期间日志发生轮转，跳过本次清理");
+                    return;
+                }
+
+                if (logFileOld.exists()) {
+                    //noinspection ResultOfMethodCallIgnored
+                    logFileOld.delete();
+                }
+
+                if (!logFile.exists()) return;
+
+                long now = logFile.length();
+                if (now <= lenCur) {
+                    // 读取之后没有新内容写入
+                    //noinspection ResultOfMethodCallIgnored
+                    logFile.delete();
+                    return;
+                }
+
+                // 保留 [lenCur, now)：这是读取之后新写的，尚未上报过
+                byte[] all = new byte[(int) now];
+                try (RandomAccessFile raf = new RandomAccessFile(logFile, "r")) {
+                    raf.readFully(all);
+                }
+                try (FileOutputStream out = new FileOutputStream(logFile, false)) {
+                    out.write(all, (int) lenCur, (int) (now - lenCur));
+                }
+            } catch (IOException e) {
+                // 清理失败不影响上报本身，下次上报会重发一遍，不丢内容
+                Log.w(TAG, "清理已上报日志失败: " + e.getMessage());
+            }
+        }
     }
 
     /**
