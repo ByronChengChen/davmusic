@@ -95,7 +95,7 @@ public class LocalCacheManager {
     /**
      * 记录一条离线可用条目。
      *
-     * @param remotePath 远端路径（如 /cmcc/music/JAY/七里香/xxx.mp3）
+     * @param remotePath 远端路径（如 /music/JAY/七里香/xxx.mp3）
      * @param displayName 显示名
      * @param size 文件字节数
      */
@@ -145,7 +145,7 @@ public class LocalCacheManager {
      * 那些"至少下载过一首歌"的目录层级，这是符合预期的：
      * 完全没下载内容的目录，离线时本来也没有可播的东西。
      *
-     * @param currentPath 当前目录（形如 "/cmcc/music/JAY"），"/" 表示根
+     * @param currentPath 当前目录（形如 "/music/JAY"），"/" 表示根
      */
     public List<WebDAVFile> listLocalTree(String currentPath) {
         List<WebDAVFile> result = new ArrayList<>();

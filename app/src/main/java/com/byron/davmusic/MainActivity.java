@@ -947,7 +947,7 @@ public class MainActivity extends AppCompatActivity implements
 
                     // 服务端限流（429）时给明确提示。
                     // 不做退避/自动重试：本应用的关键防护是"同目录 5 分钟
-                    // 内存缓存"，它已把请求量降到很低；而 OpenList 的 429
+                    // 内存缓存"，它已把请求量降到很低；而服务端的 429
                     // 实际由"认证失败次数"触发，密码正确时不会出现。
                     // 再加一层退避只会增加复杂度，还可能在误判时挡住正常请求。
                     if (isRateLimitError(e)) {
@@ -1458,7 +1458,7 @@ public class MainActivity extends AppCompatActivity implements
     /**
      * 把删除失败的原因翻译成人话。
      *
-     * 401 / 403 / 429 在 OpenList 上是三种完全不同的病因：凭据错、
+     * 401 / 403 / 429 在自建服务端上是三种完全不同的病因：凭据错、
      * 删除权限没开、以及限流或登录锁 —— 只丢一句 "HTTP 4xx"
      * 用户没法排障（这三条在 AGENTS.md 的排障表里都记着）。
      */
@@ -1466,7 +1466,7 @@ public class MainActivity extends AppCompatActivity implements
         String msg = (e == null || e.getMessage() == null) ? "未知错误" : e.getMessage();
         if (isRateLimitError(e)) return "服务器繁忙（429），请稍后再试";
         if (msg.contains("401")) return "认证失败（401）：请检查服务器的用户名/密码";
-        if (msg.contains("403")) return "无权限（403）：OpenList 需要 WebDAV 删除/管理权限";
+        if (msg.contains("403")) return "无权限（403）：服务端需要 WebDAV 删除/管理权限";
         if (msg.contains("404")) return "服务器上已不存在该条目，可下拉刷新列表";
         if (msg.contains("423")) return "条目被占用或锁定（423），请稍后重试";
         if (msg.contains("409")) return "服务端拒绝删除（409）：可能存在冲突";
@@ -1977,6 +1977,9 @@ public class MainActivity extends AppCompatActivity implements
         } else if (id == R.id.menu_log_token) {
             showLogTokenDialog();
             return true;
+        } else if (id == R.id.menu_log_endpoint) {
+            showLogEndpointDialog();
+            return true;
         }
         
         return super.onOptionsItemSelected(item);
@@ -2106,6 +2109,10 @@ public class MainActivity extends AppCompatActivity implements
             toast("日志组件未初始化", Toast.LENGTH_SHORT);
             return;
         }
+        if (!rlog.hasEndpoint()) {
+            toast("未配置上报端点\n请先「设置上报端点」", Toast.LENGTH_LONG);
+            return;
+        }
         if (!rlog.hasToken()) {
             toast("未配置上报令牌\n请先「设置上报令牌」", Toast.LENGTH_LONG);
             return;
@@ -2156,6 +2163,50 @@ public class MainActivity extends AppCompatActivity implements
                     toast(rlog.hasToken()
                             ? ("已保存：" + rlog.getMaskedToken())
                             : "已清除上报令牌", Toast.LENGTH_SHORT);
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /**
+     * 「设置上报端点」对话框。
+     *
+     * 端点（主机:端口）与令牌一样不进源码：硬编码在代码里等于把自建
+     * 日志收集端的位置一起公开（本仓库曾经就是硬编码的）。这里让用户
+     * 自己填，存在应用私有目录，留空即清除 —— 清除后日志上报直接跳过，
+     * 不会去连任何默认地址。
+     */
+    private void showLogEndpointDialog() {
+        if (rlog == null) {
+            toast("日志组件未初始化", Toast.LENGTH_SHORT);
+            return;
+        }
+
+        final EditText input = new EditText(this);
+        input.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_VARIATION_URI);
+        input.setHint("http://主机:端口");
+        input.setText(rlog.getEndpoint());
+        input.setSelection(input.getText().length());
+
+        int pad = (int) (getResources().getDisplayMetrics().density * 20);
+        LinearLayout wrapper = new LinearLayout(this);
+        wrapper.setPadding(pad, pad / 2, pad, 0);
+        wrapper.addView(input);
+        input.setSingleLine(true);
+
+        new AlertDialog.Builder(this)
+                .setTitle("设置上报端点")
+                .setMessage("当前：" + rlog.getEndpointLabel()
+                        + "\n\n填日志收集端的根地址，不要带路径（日志会 PUT 到 "
+                        + "/davmusic-logs/ 下）。\n"
+                        + "只保存在本机，不会写入源码或上传。留空保存即清除。")
+                .setView(wrapper)
+                .setPositiveButton("保存", (d, w) -> {
+                    rlog.setEndpoint(input.getText().toString());
+                    toast(rlog.hasEndpoint()
+                            ? ("已保存：" + rlog.getEndpointLabel())
+                            : "已清除上报端点", Toast.LENGTH_SHORT);
                 })
                 .setNegativeButton("取消", null)
                 .show();
@@ -2398,7 +2449,7 @@ public class MainActivity extends AppCompatActivity implements
      * 反查正在播放歌曲所在的「完整路径」——目录 + 文件名。
      *
      * 为什么要带文件名：同一目录下常有多首，只报目录用户还得自己找；
-     * 直接给出「/cmcc/music/国语/男/其他/陈小春-0932.m4a」可以一眼定位。
+     * 直接给出「/music/国语/男/其他/陈小春-0932.m4a」可以一眼定位。
      * 多服务器下再带上服务器别名，免得两台服务器路径相同时分不清。
      */
     private String trackFullPath(WebDAVFile track) {
@@ -2422,7 +2473,7 @@ public class MainActivity extends AppCompatActivity implements
     /**
      * 反查正在播放歌曲所在的「显示目录」。
      *
-     * relativePath 是去掉服务器根路径后的相对路径（例：cmcc/music/国语/男/其他/x.m4a），
+     * relativePath 是去掉服务器根路径后的相对路径（例：music/国语/男/其他/x.m4a），
      * 取父级再补前导 / 就与 currentPath 的表示法一致（见 navigateToFolder）。
      */
     private String trackDirectoryOf(WebDAVFile track) {

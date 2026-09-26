@@ -102,7 +102,7 @@
     <string name="server_active_badge">当前使用</string>
     <string name="empty_server_list">还没有任何 WebDAV 服务器\n点下方「添加服务器」新增一台</string>
     <string name="label_server_count">共 %1$d 台服务器 · 点一项即可切换</string>
-    <string name="hint_server_name">名称（可选，便于区分，如「移动云盘」）</string>
+    <string name="hint_server_name">名称（可选，便于区分，如「家里的 NAS」）</string>
     <string name="title_add_server">添加 WebDAV 服务器</string>
     <string name="title_edit_server">编辑 WebDAV 服务器</string>
     <string name="msg_switched_server">已切换到：%s</string>

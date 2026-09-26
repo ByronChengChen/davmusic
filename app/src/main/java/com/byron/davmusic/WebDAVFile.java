@@ -5,7 +5,7 @@ import java.util.Date;
 public class WebDAVFile {
     private String href;
     private String displayName;
-    private String relativePath;   // 剥离 baseUrl 并 URL 解码后的相对路径，如 "cmcc/music/苏慧伦"
+    private String relativePath;   // 剥离 baseUrl 并 URL 解码后的相对路径，如 "music/苏慧伦"
 
     /**
      * 这个条目属于哪台服务器。

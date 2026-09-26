@@ -99,3 +99,7 @@ Thumbs.db
 # 必须纳入版本控制 —— 否则每次 CI 构建签名不同，无法覆盖安装
 # （报错 Conflicting app signatures）。debug 签名无安全风险。
 !keystore/davmusic.p12
+
+# 私有运维笔记：记录服务端部署形态、主机路径、端口、单元名等
+# 「不该进公开仓库」的信息。只留在本地，永不提交。
+private-ops/

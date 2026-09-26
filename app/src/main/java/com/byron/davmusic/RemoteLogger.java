@@ -46,6 +46,8 @@ import okhttp3.Response;
  *
  *     · 令牌由用户在「设置上报令牌」里手动输入，存在应用私有目录
  *       （SharedPreferences），**不进源码、不进仓库、不进 APK**。
+ *     · **端点（主机:端口）同样由用户手输**（菜单 → 设置上报端点）：
+ *       源码里不再出现任何收集端地址，免得连"日志往哪台机器发"也一起公开。
  *     · 每次上报现算签名，令牌本身**从不上线**：
  *         canonical = "PUT\n<path>\n<timestamp>\n<nonce>\n<sha256(body)>"
  *         signature = hex(HMAC-SHA256(key = 令牌, msg = canonical))
@@ -62,14 +64,19 @@ public class RemoteLogger {
 
     private static final String TAG = "RemoteLogger";
 
-    /** 上报端点。只有这一个：腾讯那台（公网 443 + 已泄漏口令）已停用。 */
-    private static final String ENDPOINT_LABEL = "本机";
-    private static final String ENDPOINT_BASE = "http://140.245.120.89:9339";
+    /**
+     * 上报路径（相对端点根）。
+     *
+     * ⛔ 端点的「主机:端口」不写在这里：源码硬编码收集端地址，等于把
+     * 自己的主机地址与开放端口一并公开（本仓库曾经就是这么干的）。
+     * 端点改由用户在「设置上报端点」里手输，见下方 getEndpoint()。
+     */
     private static final String ENDPOINT_PATH = "/davmusic-logs/";
 
-    /** 令牌存放位置：应用私有 SharedPreferences */
+    /** 令牌与端点存放位置：应用私有 SharedPreferences */
     private static final String PREF_NAME = "davmusic_log_prefs";
     private static final String PREF_TOKEN = "log_token";
+    private static final String PREF_ENDPOINT = "log_endpoint";
 
     /** 单文件上限，超过则轮转为 .1 备份 */
     private static final long MAX_FILE_SIZE = 512 * 1024;
@@ -143,6 +150,51 @@ public class RemoteLogger {
         } catch (Exception e) {
             Log.w(TAG, "保存上报令牌失败: " + e.getMessage());
         }
+    }
+
+    // ---------- 端点管理 ----------
+
+    /**
+     * 是否已配置上报端点。
+     *
+     * 端点与令牌一样由用户手输（菜单 → 设置上报端点），存入应用私有
+     * SharedPreferences。未配置时 upload() 直接跳过，不发任何请求 ——
+     * 与令牌未配置时的行为保持一致，都是「明确告知」而不是静默失败。
+     */
+    public boolean hasEndpoint() {
+        return !getEndpoint().isEmpty();
+    }
+
+    public String getEndpoint() {
+        try {
+            return prefs().getString(PREF_ENDPOINT, "");
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /**
+     * 保存端点。传空串等于清除。
+     *
+     * 顺手做轻量规范化：去首尾空白、去掉尾斜杠 —— 否则用户粘贴
+     * 「http://host/」时拼出来的 URL 会变成「//davmusic-logs/」，
+     * 部分服务端会当成不同路径而 404。
+     */
+    public void setEndpoint(String endpoint) {
+        try {
+            String v = endpoint == null ? "" : endpoint.trim();
+            while (v.endsWith("/")) v = v.substring(0, v.length() - 1);
+            prefs().edit().putString(PREF_ENDPOINT, v).apply();
+        } catch (Exception e) {
+            Log.w(TAG, "保存上报端点失败: " + e.getMessage());
+        }
+    }
+
+    /** 端点的展示形式：去掉协议前缀，避免界面与日志里拖一长串 */
+    public String getEndpointLabel() {
+        String e = getEndpoint();
+        if (e.isEmpty()) return "（未配置）";
+        return e.replaceFirst("^https?://", "");
     }
 
     /** 已配置令牌的掩码形式，用于在界面上确认「配的是哪一个」而不暴露它 */
@@ -256,7 +308,7 @@ public class RemoteLogger {
     }
 
     /**
-     * 构造签名串。必须与服务端 log_sink.py 的 canonical_string() 逐字节一致：
+     * 构造签名串。必须与服务端验签实现里的 canonical_string() 逐字节一致：
      *   "PUT\n" + path + "\n" + timestamp + "\n" + nonce + "\n" + bodySha256Hex
      */
     private static String canonicalString(String path, String timestamp,
@@ -279,6 +331,14 @@ public class RemoteLogger {
      *             切回主线程再更新 UI。
      */
     public void upload(final String note, final UploadCallback cb) {
+        if (!hasEndpoint()) {
+            // 未配置端点：不发请求，并且要明确告知，不能静默失败。
+            write("W", TAG, "未配置上报端点，跳过日志上报");
+            if (cb != null) {
+                cb.onResult(false, "未配置上报端点\n（菜单 → 设置上报端点）");
+            }
+            return;
+        }
         if (!hasToken()) {
             // 未配置令牌：不发请求，并且要明确告知，不能静默失败。
             write("W", TAG, "未配置上报令牌，跳过日志上报");
@@ -406,7 +466,7 @@ public class RemoteLogger {
                     canonicalString(path, timestamp, nonce, bodySha));
 
             Request request = new Request.Builder()
-                    .url(ENDPOINT_BASE + path)
+                    .url(getEndpoint() + path)
                     .put(RequestBody.create(body,
                             MediaType.parse("text/plain; charset=utf-8")))
                     .header("X-Davmusic-Timestamp", timestamp)
@@ -417,18 +477,18 @@ public class RemoteLogger {
 
             try (Response resp = uploadClient.newCall(request).execute()) {
                 if (resp.isSuccessful()) {
-                    write("I", TAG, "日志已上报 " + ENDPOINT_LABEL + ": " + fileName
+                    write("I", TAG, "日志已上报 " + getEndpointLabel() + ": " + fileName
                             + " (" + body.length + " 字节)");
                     return null;
                 }
                 int code = resp.code();
                 String err = resp.header("X-Davmusic-Error");
-                write("W", TAG, "日志上报失败 " + ENDPOINT_LABEL
+                write("W", TAG, "日志上报失败 " + getEndpointLabel()
                         + ": HTTP " + code + " (err=" + err + ")");
                 return describeFailure(code, err);
             }
         } catch (Exception ex) {
-            write("E", TAG, "日志上报异常 " + ENDPOINT_LABEL + ": " + ex.getMessage());
+            write("E", TAG, "日志上报异常 " + getEndpointLabel() + ": " + ex.getMessage());
             return "无法连接服务器\n" + ex.getClass().getSimpleName()
                     + ": " + ex.getMessage();
         }
