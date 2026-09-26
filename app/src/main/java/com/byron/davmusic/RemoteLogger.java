@@ -176,14 +176,19 @@ public class RemoteLogger {
     /**
      * 保存端点。传空串等于清除。
      *
-     * 顺手做轻量规范化：去首尾空白、去掉尾斜杠 —— 否则用户粘贴
-     * 「http://host/」时拼出来的 URL 会变成「//davmusic-logs/」，
-     * 部分服务端会当成不同路径而 404。
+     * 顺手做轻量规范化，都是为了让用户「怎么填都能用」：
+     *   · 去首尾空白、去掉尾斜杠 —— 否则粘贴「http://host/」会拼出
+     *     「//davmusic-logs/」，部分服务端当成不同路径而 404。
+     *   · 漏填协议头时补 `http://` —— 否则 OkHttp 直接抛
+     *     「Expected URL scheme」，用户看到的是一句莫名其妙的报错。
      */
     public void setEndpoint(String endpoint) {
         try {
             String v = endpoint == null ? "" : endpoint.trim();
             while (v.endsWith("/")) v = v.substring(0, v.length() - 1);
+            if (!v.isEmpty() && !v.matches("(?i)^https?://.*")) {
+                v = "http://" + v;
+            }
             prefs().edit().putString(PREF_ENDPOINT, v).apply();
         } catch (Exception e) {
             Log.w(TAG, "保存上报端点失败: " + e.getMessage());
