@@ -142,6 +142,34 @@ public class FileListAdapter extends RecyclerView.Adapter<FileListAdapter.ViewHo
         }
     }
     
+    /**
+     * 按条目身份移除（左滑删除成功后调用）。
+     *
+     * 为什么不用下标定位：删除请求在飞行途中，后台可能刚好完成了一次
+     * 目录刷新（stale-while-revalidate 的静默刷新），列表的内容与顺序
+     * 都会变；此时拿旧下标去删会误删别的条目。用 getCacheKey()
+     * （服务器 id + 相对路径）定位才是稳的。
+     *
+     * 只动内存里的这一份列表：远端已经删掉了，缓存失效由调用方负责
+     * （MainActivity 会同时清内存目录缓存与磁盘快照），下一次进这个
+     * 目录会重新 PROPFIND，拿到的就是服务端的真实内容。
+     *
+     * @return 是否真的移除了（条目已不在列表里时返回 false）
+     */
+    public boolean removeFile(WebDAVFile target) {
+        if (target == null) return false;
+        String key = target.getCacheKey();
+        for (int i = 0; i < files.size(); i++) {
+            WebDAVFile f = files.get(i);
+            if (f != null && key.equals(f.getCacheKey())) {
+                files.remove(i);
+                notifyItemRemoved(i);
+                return true;
+            }
+        }
+        return false;
+    }
+
     @NonNull
     @Override
     public ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {

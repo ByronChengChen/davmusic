@@ -4,6 +4,8 @@ import android.app.AlertDialog;
 import android.app.ProgressDialog;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.graphics.Canvas;
+import android.graphics.Paint;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -26,6 +28,7 @@ import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
 import androidx.core.content.ContextCompat;
+import androidx.recyclerview.widget.ItemTouchHelper;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
@@ -302,6 +305,7 @@ public class MainActivity extends AppCompatActivity implements
         fileListAdapter = new FileListAdapter(this);
         fileListAdapter.setOnItemClickListener(this);
         recyclerView.setAdapter(fileListAdapter);
+        attachSwipeToDelete();
         
         // 迷你播放器
         miniPlayerLayout = findViewById(R.id.miniPlayerLayout);
@@ -1283,6 +1287,214 @@ public class MainActivity extends AppCompatActivity implements
                 .show();
     }
     
+    // ---- 左滑删除（远端） ----
+
+    /**
+     * 挂上「左滑删除」手势。
+     *
+     * 为什么用左滑而不是给每个条目再加一个删除按钮：条目行已经承载了
+     * 下载状态与进度条，再塞按钮会让误触变多；删除是破坏性操作，
+     * 用「滑出屏幕 + 二次确认」两道门槛更稳妥。
+     *
+     * 删除作用于【远端】：目标服务器取自条目自带的 serverId，
+     * 而不是「当前浏览的是哪台」—— 与「服务器即根目录」一致。
+     */
+    private void attachSwipeToDelete() {
+        final float density = getResources().getDisplayMetrics().density;
+        final float labelPadding = 16 * density;
+
+        // 画笔只建一次：onChildDraw 每帧都会被调用，逐帧 new Paint 是浪费
+        final Paint backPaint = new Paint();
+        backPaint.setColor(ContextCompat.getColor(this, android.R.color.holo_red_dark));
+        final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        textPaint.setColor(android.graphics.Color.WHITE);
+        textPaint.setTextSize(16 * density);
+        textPaint.setTextAlign(Paint.Align.RIGHT);
+
+        ItemTouchHelper.SimpleCallback callback = new ItemTouchHelper.SimpleCallback(
+                0, ItemTouchHelper.LEFT) {
+            @Override
+            public int getMovementFlags(@NonNull RecyclerView recyclerView,
+                                        @NonNull RecyclerView.ViewHolder viewHolder) {
+                // 根目录里的条目是「服务器」而不是文件：不给滑动，
+                // 免得一滑就把服务器配置删了（那是服务器管理页的职责）
+                if (currentServer == null) return 0;
+                return super.getMovementFlags(recyclerView, viewHolder);
+            }
+
+            @Override
+            public boolean onMove(@NonNull RecyclerView recyclerView,
+                                  @NonNull RecyclerView.ViewHolder viewHolder,
+                                  @NonNull RecyclerView.ViewHolder target) {
+                return false;   // 只支持左滑，不支持拖动排序
+            }
+
+            @Override
+            public void onSwiped(@NonNull RecyclerView.ViewHolder viewHolder, int direction) {
+                int position = viewHolder.getBindingAdapterPosition();
+                List<WebDAVFile> files = fileListAdapter.getFiles();
+                if (position == RecyclerView.NO_POSITION || position >= files.size()) {
+                    // 位置已失效（列表刚被刷新过）：把滑走的行放回去
+                    fileListAdapter.notifyDataSetChanged();
+                    return;
+                }
+                confirmDeleteRemote(files.get(position), position);
+            }
+
+            /** 滑动时在条目背后画红底 + 「删除」，给用户明确预期 */
+            @Override
+            public void onChildDraw(@NonNull Canvas c, @NonNull RecyclerView recyclerView,
+                                    @NonNull RecyclerView.ViewHolder viewHolder,
+                                    float dX, float dY, int actionState, boolean isCurrentlyActive) {
+                View item = viewHolder.itemView;
+                if (actionState == ItemTouchHelper.ACTION_STATE_SWIPE && dX < 0) {
+                    c.drawRect(item.getLeft() + dX, item.getTop(),
+                            item.getRight(), item.getBottom(), backPaint);
+
+                    Paint.FontMetrics fm = textPaint.getFontMetrics();
+                    float centerY = (item.getTop() + item.getBottom()) / 2f;
+                    // 垂直居中用 ascent/descent 的中点，用 top/bottom 会偏上
+                    float baseline = centerY - (fm.ascent + fm.descent) / 2f;
+                    c.drawText("删除", item.getRight() - labelPadding, baseline, textPaint);
+                }
+                super.onChildDraw(c, recyclerView, viewHolder, dX, dY, actionState, isCurrentlyActive);
+            }
+        };
+        new ItemTouchHelper(callback).attachToRecyclerView(recyclerView);
+    }
+
+    /**
+     * 左滑后的二次确认。
+     *
+     * 取消时一定要 notifyItemChanged 把滑走的行放回原位 ——
+     * 条目在数据层从未被移除，只有视图被滑到了屏幕外，
+     * 不刷新就会在列表里留下一个空位。
+     */
+    private void confirmDeleteRemote(final WebDAVFile file, final int position) {
+        if (isOfflineMode || !NetworkUtils.isNetworkConnected(this)) {
+            toast("网络不可用，无法删除", Toast.LENGTH_SHORT);
+            fileListAdapter.notifyItemChanged(position);
+            return;
+        }
+
+        final boolean isDir = file.isCollection();
+        StringBuilder message = new StringBuilder();
+        message.append("确定要删除")
+                .append(isDir ? "文件夹" : "文件")
+                .append("「").append(file.getDisplayName()).append("」吗？\n\n");
+        if (isDir) {
+            message.append("文件夹里的所有内容会一并删除。\n");
+        }
+        message.append("此操作直接作用于服务器，不可恢复。");
+
+        new AlertDialog.Builder(this)
+                .setTitle(isDir ? "删除文件夹" : "删除文件")
+                .setMessage(message.toString())
+                .setPositiveButton("删除", (dialog, which) -> performRemoteDelete(file, position))
+                .setNegativeButton("取消", (dialog, which) -> fileListAdapter.notifyItemChanged(position))
+                .setOnCancelListener(dialog -> fileListAdapter.notifyItemChanged(position))
+                .show();
+    }
+
+    /**
+     * 发起远端删除（WebDAV DELETE）。
+     *
+     * 发起时的服务器与所在目录先捕获成 final：删除是异步的，期间用户
+     * 完全可能已经切到别的目录甚至别的服务器，缓存失效与列表增删必须
+     * 按「当初那一份」来做，否则会动到新目录的数据。
+     */
+    private void performRemoteDelete(final WebDAVFile file, final int position) {
+        final ServerProfile serverAtRequest = findServerById(file.getServerId());
+        final String pathAtRequest = file.getRelativePath();
+        final String dirAtRequest = currentPath;
+
+        // 条目缺少归属/路径信息时宁可不动：删除请求必须发往确定的服务器与路径，
+        // 猜一个（例如退回「第一台服务器」）可能删掉完全无关的文件。
+        if (serverAtRequest == null) {
+            toast("无法确定该条目属于哪台服务器，请刷新后重试", Toast.LENGTH_SHORT);
+            fileListAdapter.notifyItemChanged(position);
+            return;
+        }
+        if (pathAtRequest == null || pathAtRequest.trim().isEmpty()) {
+            toast("该条目缺少路径信息，无法删除", Toast.LENGTH_SHORT);
+            fileListAdapter.notifyItemChanged(position);
+            return;
+        }
+
+        if (rlog != null) {
+            rlog.i(TAG, "删除远端: " + file.getDisplayName()
+                    + " | server=" + serverAtRequest.getDisplayName()
+                    + " | path=" + pathAtRequest);
+        }
+        showLoading("正在删除...");
+
+        clientFor(serverAtRequest).deleteRemote(pathAtRequest, file.isCollection(),
+                new WebDAVClient.WebDAVCallback<Integer>() {
+            @Override
+            public void onSuccess(Integer code) {
+                mainHandler.post(() -> {
+                    dismissLoading();
+                    onRemoteDeleted(file, serverAtRequest, dirAtRequest, code);
+                });
+            }
+
+            @Override
+            public void onError(Exception e) {
+                final String msg = (e == null || e.getMessage() == null)
+                        ? "未知错误" : e.getMessage();
+                if (rlog != null) rlog.w(TAG, "删除失败: " + pathAtRequest + " | " + msg);
+
+                mainHandler.post(() -> {
+                    dismissLoading();
+                    // 删除失败：把条目放回列表，并把服务端的真实原因告诉用户
+                    fileListAdapter.notifyItemChanged(position);
+                    if (isRateLimitError(e)) {
+                        toast("服务器繁忙，请稍后再试", Toast.LENGTH_SHORT);
+                    } else {
+                        toast("删除失败: " + msg, Toast.LENGTH_LONG);
+                    }
+                });
+            }
+        });
+    }
+
+    /** 远端删除成功后的收尾：失效缓存、清理本地副本、更新列表 */
+    private void onRemoteDeleted(WebDAVFile file, ServerProfile server,
+                                 String dirAtRequest, int httpCode) {
+        if (rlog != null) {
+            rlog.i(TAG, "删除成功: " + file.getDisplayName()
+                    + " | HTTP " + httpCode + " | dir=" + dirAtRequest);
+        }
+
+        // 1) 目录缓存必须失效，否则 5 分钟内再进这个目录，命中的还是
+        //    「删除之前」的那份数据，已删条目会重新出现。
+        //    内存缓存与磁盘快照同键（服务器 id + 目录路径），两个都要清。
+        String cacheKey = cacheKeyOf(server, dirAtRequest);
+        invalidateDirCache(cacheKey);
+        cacheManager.deleteSnapshot(cacheKey);
+
+        // 2) 本地已下载的副本一起清掉：远端都没了，留着副本只会让
+        //    离线列表里出现一个永远播不了、也删不掉的条目
+        try {
+            cacheManager.removeDownloadedFile(file.getCacheKey());
+        } catch (Exception e) {
+            Log.w(TAG, "清理本地副本失败: " + e.getMessage());
+        }
+
+        // 3) 只有用户仍停留在「发起删除时所在的服务器与目录」，才动这个列表；
+        //    已经切走的话交给下一次加载去刷新，避免动到新目录的数据。
+        //    移除按条目身份（cacheKey）而不是下标 —— 期间可能刚好完成过一次
+        //    静默刷新，列表顺序已经变了，按下标会误删别的条目。
+        boolean sameServer = currentServer != null
+                && currentServer.getId() != null
+                && currentServer.getId().equals(server.getId());
+        if (sameServer && dirAtRequest != null && dirAtRequest.equals(currentPath)) {
+            fileListAdapter.removeFile(file);
+        }
+
+        toast("已删除: " + file.getDisplayName(), Toast.LENGTH_SHORT);
+    }
+
     private void showFileContextMenu(WebDAVFile file, View view) {
         new AlertDialog.Builder(this)
                 .setTitle(file.getDisplayName())

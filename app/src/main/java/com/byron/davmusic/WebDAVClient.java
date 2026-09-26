@@ -323,6 +323,80 @@ public class WebDAVClient {
         });
     }
 
+    // 删除远端文件或目录
+    /**
+     * 删除远端文件或目录（WebDAV DELETE）。
+     *
+     * 要点：
+     *  - 路径必须逐段编码：中文/空格目录名不编码时请求根本发不出去，
+     *    与下载、上传是同一个坑（统一走 getDownloadUrl）。
+     *  - 目录的删除由服务端递归完成（RFC 4918：对 collection 的 DELETE
+     *    会删掉整棵子树），客户端不需要自己遍历子项。
+     *  - 目录 URL 要带尾斜杠，与 PROPFIND 保持一致：不带时部分服务端会
+     *    301 到带斜杠的规范地址，而 OkHttp 会把 301/302 上的 DELETE
+     *    改写成 GET —— 结果就是「删除成功」是假的。
+     *  - 状态码原样交回调用方：401/403 是凭据或权限问题，404 是条目已经
+     *    不在了，429 是限流 —— 只回 true/false 用户分不清错在哪。
+     *  - 不做自动重试：与全局策略一致（见 MainActivity 中关于 429 的说明），
+     *    OpenList 的登录锁经不起客户端重试。
+     *
+     * @param remotePath   相对路径（不含 baseUrl），如 "cmcc/music/xxx.m4a"
+     * @param isCollection 是否为目录（决定是否补尾斜杠）
+     * @param callback     成功时回传 HTTP 状态码（WebDAV 正常应答为 204）
+     */
+    public void deleteRemote(String remotePath, boolean isCollection,
+                             final WebDAVCallback<Integer> callback) {
+        if (!isConfigured()) {
+            callback.onError(new Exception("WebDAV client not configured"));
+            return;
+        }
+        // 空路径会退化成对服务器根目录发 DELETE —— 必须挡住，
+        // 否则一次误调用就是把整台服务器的内容清空。
+        if (remotePath == null || trimSlashes(remotePath).isEmpty()) {
+            callback.onError(new Exception("拒绝删除服务器根目录"));
+            return;
+        }
+
+        String url = getDownloadUrl(remotePath);
+        if (isCollection && !url.endsWith("/")) {
+            url += "/";
+        }
+
+        Request request = new Request.Builder()
+                .url(url)
+                .delete()
+                .header("Authorization", getBasicAuthHeader())
+                .build();
+
+        client.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                callback.onError(e);
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                try {
+                    if (response.isSuccessful()) {
+                        // 防御：重定向可能让 DELETE 被改写成 GET，
+                        // 此时 2xx 并不能证明条目真的被删掉了，不能报成功
+                        if (!"DELETE".equals(response.request().method())) {
+                            callback.onError(new Exception(
+                                    "服务端重定向后未执行删除（" + response.request().method() + "）"));
+                            return;
+                        }
+                        callback.onSuccess(response.code());
+                    } else {
+                        callback.onError(new Exception("HTTP " + response.code()
+                                + ": " + response.message()));
+                    }
+                } finally {
+                    response.close();
+                }
+            }
+        });
+    }
+
     /** 进度回调切到主线程，避免调用方在子线程更新 UI */
     private void notifyProgressOnMain(final ProgressCallback callback, final int percent) {
         new android.os.Handler(android.os.Looper.getMainLooper())
