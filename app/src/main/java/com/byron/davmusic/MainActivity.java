@@ -1440,22 +1440,37 @@ public class MainActivity extends AppCompatActivity implements
 
             @Override
             public void onError(Exception e) {
-                final String msg = (e == null || e.getMessage() == null)
-                        ? "未知错误" : e.getMessage();
-                if (rlog != null) rlog.w(TAG, "删除失败: " + pathAtRequest + " | " + msg);
+                if (rlog != null) {
+                    rlog.w(TAG, "删除失败: " + pathAtRequest + " | "
+                            + (e == null ? "null" : e.getMessage()));
+                }
 
                 mainHandler.post(() -> {
                     dismissLoading();
                     // 删除失败：把条目放回列表，并把服务端的真实原因告诉用户
                     fileListAdapter.notifyItemChanged(position);
-                    if (isRateLimitError(e)) {
-                        toast("服务器繁忙，请稍后再试", Toast.LENGTH_SHORT);
-                    } else {
-                        toast("删除失败: " + msg, Toast.LENGTH_LONG);
-                    }
+                    toast(deleteFailureMessage(e), Toast.LENGTH_LONG);
                 });
             }
         });
+    }
+
+    /**
+     * 把删除失败的原因翻译成人话。
+     *
+     * 401 / 403 / 429 在 OpenList 上是三种完全不同的病因：凭据错、
+     * 删除权限没开、以及限流或登录锁 —— 只丢一句 "HTTP 4xx"
+     * 用户没法排障（这三条在 AGENTS.md 的排障表里都记着）。
+     */
+    private String deleteFailureMessage(Exception e) {
+        String msg = (e == null || e.getMessage() == null) ? "未知错误" : e.getMessage();
+        if (isRateLimitError(e)) return "服务器繁忙（429），请稍后再试";
+        if (msg.contains("401")) return "认证失败（401）：请检查服务器的用户名/密码";
+        if (msg.contains("403")) return "无权限（403）：OpenList 需要 WebDAV 删除/管理权限";
+        if (msg.contains("404")) return "服务器上已不存在该条目，可下拉刷新列表";
+        if (msg.contains("423")) return "条目被占用或锁定（423），请稍后重试";
+        if (msg.contains("409")) return "服务端拒绝删除（409）：可能存在冲突";
+        return "删除失败: " + msg;
     }
 
     /** 远端删除成功后的收尾：失效缓存、清理本地副本、更新列表 */
