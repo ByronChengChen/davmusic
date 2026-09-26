@@ -276,7 +276,7 @@ public class FileListAdapter extends RecyclerView.Adapter<FileListAdapter.ViewHo
             // RecyclerView 的 ViewHolder 会被复用，一旦某个 holder 被设成
             // GONE 与 0×0 布局参数，它被复用去渲染别的条目时会带着这些
             // 残留状态，导致条目时有时无、位置错乱 —— 这正是"滑动时
-            // JAY 有时在第 1 位、有时第 2 位、有时消失"的原因，
+            // 某个条目有时在第 1 位、有时第 2 位、有时消失"的原因，
             // 且因为是通用逻辑，其他目录同样错乱。
             //
             // 正确的做法：需要隐藏的项应在 setFiles() 阶段就从数据集里

@@ -129,7 +129,7 @@ public class MainActivity extends AppCompatActivity implements
      * 空列表也要缓存 —— 「这个目录是空的」同样是一个有效事实，缓存它才能
      * 让重复进入不产生请求。早期实现把空列表当成「没有内容」直接跳过，
      * 导致空目录永远命中不了缓存，每次进入都重新 PROPFIND
-     * （真机实测：AI工具箱 21 次进入 = 21 次请求，0 次缓存写入）。
+     * （真机实测：某个大目录 21 次进入 = 21 次请求，0 次缓存写入）。
      *
      * 之所以现在能安全地缓存空列表：畸形响应已在
      * WebDAVClient.parsePropfindResponse 里被拦成 onError，
@@ -905,7 +905,7 @@ public class MainActivity extends AppCompatActivity implements
                     updateFileDownloadStates(files);
 
                     // 空列表也写快照 —— 「这个目录是空的」是有效事实，必须缓存，
-                    // 否则每次进入都会重新 PROPFIND（真机实测：AI工具箱 21 次
+                    // 否则每次进入都会重新 PROPFIND（真机实测：某个大目录 21 次
                     // 进入 = 21 次请求，0 次缓存写入）。
                     //
                     // 早期实现写的是 `!files.isEmpty()`，理由是「避免一次空响应
@@ -2449,7 +2449,7 @@ public class MainActivity extends AppCompatActivity implements
      * 反查正在播放歌曲所在的「完整路径」——目录 + 文件名。
      *
      * 为什么要带文件名：同一目录下常有多首，只报目录用户还得自己找；
-     * 直接给出「/music/国语/男/其他/陈小春-0932.m4a」可以一眼定位。
+     * 直接给出「/music/语种/性别/分类/歌手-0932.m4a」可以一眼定位。
      * 多服务器下再带上服务器别名，免得两台服务器路径相同时分不清。
      */
     private String trackFullPath(WebDAVFile track) {
@@ -2473,7 +2473,7 @@ public class MainActivity extends AppCompatActivity implements
     /**
      * 反查正在播放歌曲所在的「显示目录」。
      *
-     * relativePath 是去掉服务器根路径后的相对路径（例：music/国语/男/其他/x.m4a），
+     * relativePath 是去掉服务器根路径后的相对路径（例：music/语种/性别/分类/x.m4a），
      * 取父级再补前导 / 就与 currentPath 的表示法一致（见 navigateToFolder）。
      */
     private String trackDirectoryOf(WebDAVFile track) {

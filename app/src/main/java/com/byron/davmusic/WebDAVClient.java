@@ -717,7 +717,7 @@ public class WebDAVClient {
             String href = getElementText(response, "DAV:", "href");
             if (href == null || href.isEmpty()) continue;
 
-            // 1) 剥离 baseUrl 的 path 前缀，得到相对路径（如 "music/苏慧伦"）
+            // 1) 剥离 baseUrl 的 path 前缀，得到相对路径（如 "music/某歌手"）
             String relPath = stripBasePath(href, basePath);
 
             // 2) URL 解码（处理中文、空格等）
