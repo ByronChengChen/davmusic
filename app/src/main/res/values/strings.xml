@@ -126,4 +126,15 @@
     <string name="error_alias_duplicate">别名「%s」已存在，请换一个</string>
     <string name="msg_enter_server">点选一台服务器开始浏览</string>
     <string name="btn_save">保存</string>
+
+    <!-- ===== 新建文件夹（进入某台服务器后右上角）===== -->
+    <string name="menu_new_folder">新建文件夹</string>
+    <string name="title_new_folder">新建文件夹</string>
+    <string name="hint_folder_name">文件夹名称</string>
+    <string name="msg_folder_created">已创建文件夹：%s</string>
+    <string name="msg_folder_exists">当前目录已有「%s」，换个名字吧</string>
+    <string name="error_folder_name_required">请输入文件夹名称</string>
+    <string name="error_folder_name_separator">名称不能包含 / 或 \\</string>
+    <string name="error_folder_name_invalid">名称不合法</string>
+    <string name="error_folder_name_too_long">名称过长（最多 100 个字符）</string>
 </resources>

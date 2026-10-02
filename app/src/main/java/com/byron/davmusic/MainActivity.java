@@ -91,6 +91,16 @@ public class MainActivity extends AppCompatActivity implements
     private boolean isSeeking = false;   // 用户正在拖动进度条时，暂停自动刷新
 
     /**
+     * 右上角「新建文件夹」菜单项上一次的可见性状态。
+     *
+     * 用于在「进入/退出服务器」时只失效一次选项菜单 —— 选项菜单创建之后
+     * 并不会每次显示都重新走 onPrepareOptionsMenu，不主动
+     * invalidateOptionsMenu 的话，从服务器退回列表后「新建文件夹」会留在
+     * 右上角，而那一层根本没有可新建的对象。
+     */
+    private boolean menuInServerState = false;
+
+    /**
      * 目录加载请求序号。
      *
      * 解决的问题：目录列表有多个异步渲染路径（快照、网络、离线列举、
@@ -1023,6 +1033,16 @@ public class MainActivity extends AppCompatActivity implements
         // 更新返回按钮状态：根目录时隐藏
         View backButton = findViewById(R.id.backButton);
         backButton.setVisibility(currentServer == null ? View.GONE : View.VISIBLE);
+
+        // 「新建文件夹」菜单项跟着「是否已进入某台服务器」显隐。
+        // updatePathDisplay 是所有导航状态的必经之路（进服务器、进/退目录、
+        // 退回服务器列表都会走到这里），因此把菜单的失效判定放在这里，
+        // 不必在 enterServer / exitToServerRoot 里各写一遍。
+        boolean inServer = currentServer != null;
+        if (inServer != menuInServerState) {
+            menuInServerState = inServer;
+            invalidateOptionsMenu();
+        }
     }
 
     /** 按 id 找服务器配置 */
@@ -1510,6 +1530,207 @@ public class MainActivity extends AppCompatActivity implements
         toast("已删除: " + file.getDisplayName(), Toast.LENGTH_SHORT);
     }
 
+    // ---- 新建文件夹（远端 MKCOL） ----
+
+    /**
+     * 「新建文件夹」入口（右上角菜单项，仅在已进入某台服务器时可见）。
+     *
+     * 前置条件先查清楚：这条路径会真的在服务器上建目录（MKCOL），
+     * 离线、凭据不全时发出去只是白跑一趟，不如直接告诉用户原因。
+     * 目标目录固定是【当前所在目录】，所以对话框里把完整位置显示出来，
+     * 避免用户在子目录里误以为会建到服务器根目录。
+     */
+    private void showNewFolderDialog() {
+        if (currentServer == null) {
+            toast("请先进入某个服务器再新建文件夹", Toast.LENGTH_SHORT);
+            return;
+        }
+        if (isOfflineMode || !NetworkUtils.isNetworkConnected(this)) {
+            toast("离线模式下无法新建文件夹，请先连接网络", Toast.LENGTH_SHORT);
+            return;
+        }
+        if (!currentServer.isComplete()) {
+            toast("当前服务器配置不完整，请先在服务器管理里补全", Toast.LENGTH_SHORT);
+            return;
+        }
+
+        final EditText input = new EditText(this);
+        input.setInputType(InputType.TYPE_CLASS_TEXT);
+        input.setHint(getString(R.string.hint_folder_name));
+        input.setSingleLine(true);
+        input.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        int pad = (int) (getResources().getDisplayMetrics().density * 20);
+        LinearLayout wrapper = new LinearLayout(this);
+        wrapper.setPadding(pad, pad / 2, pad, 0);
+        wrapper.addView(input);
+
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.title_new_folder)
+                .setMessage("将建在 " + currentServer.getDisplayName() + ": " + currentPath)
+                .setView(wrapper)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton("新建", null)
+                .create();
+        dialog.show();
+
+        // 校验不过就保持对话框打开，让用户直接改名字，而不是重敲一遍
+        // （与服务器编辑对话框同一个套路）
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String name = input.getText().toString().trim();
+            String error = validateFolderName(name);
+            if (error != null) {
+                toast(error, Toast.LENGTH_SHORT);
+                return;
+            }
+            // 本地已知列表里已有同名条目：直接提示，省一次注定被拒的 MKCOL
+            if (folderNameExists(name)) {
+                toast(getString(R.string.msg_folder_exists, name), Toast.LENGTH_SHORT);
+                return;
+            }
+            dialog.dismiss();
+            createRemoteFolder(name);
+        });
+
+        input.requestFocus();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setSoftInputMode(
+                    android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+        }
+    }
+
+    /**
+     * 校验文件夹名。
+     *
+     * 只挡「不挡就一定是错的」那几类：不同云盘对非法字符的规则并不一致，
+     * 客户端自造一套规则只会把合法名字一起挡掉，剩下的交给服务端裁决。
+     * 唯独路径分隔符必须在这里挡住 —— 名字里的 "/" 会被当成多级路径，
+     * 实际变成"创建子目录"，与界面上承诺的"在当前目录新建一个文件夹"不符。
+     *
+     * @return 错误提示；名字合法时返回 null
+     */
+    private String validateFolderName(String name) {
+        if (name == null || name.isEmpty()) {
+            return getString(R.string.error_folder_name_required);
+        }
+        if (name.contains("/") || name.contains("\\")) {
+            return getString(R.string.error_folder_name_separator);
+        }
+        if (".".equals(name) || "..".equals(name)) {
+            return getString(R.string.error_folder_name_invalid);
+        }
+        if (name.length() > 100) {
+            return getString(R.string.error_folder_name_too_long);
+        }
+        return null;
+    }
+
+    /** 当前列表里是否已有同名条目（不再发请求，纯本地判断） */
+    private boolean folderNameExists(String name) {
+        List<WebDAVFile> files = (fileListAdapter == null) ? null : fileListAdapter.getFiles();
+        if (files == null) return false;
+        for (WebDAVFile f : files) {
+            if (f == null || f.getDisplayName() == null) continue;
+            if (f.getDisplayName().equals(name)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * 发起远端新建（WebDAV MKCOL）。
+     *
+     * 与删除同一套原则：发起时的服务器与目录先捕获成 final。创建是异步的，
+     * 期间用户完全可能已经切到别的目录甚至别的服务器 —— 缓存失效与列表刷新
+     * 必须按「当初那一份」来做，否则会动到新目录的数据。
+     */
+    private void createRemoteFolder(final String folderName) {
+        final ServerProfile serverAtRequest = currentServer;
+        final String dirAtRequest = currentPath;
+        final String remotePath = joinPath(dirAtRequest, folderName);
+
+        if (rlog != null) {
+            rlog.i(TAG, "新建文件夹: " + folderName
+                    + " | server=" + (serverAtRequest == null ? "null" : serverAtRequest.getDisplayName())
+                    + " | path=" + remotePath);
+        }
+        showLoading("正在新建文件夹...");
+
+        clientFor(serverAtRequest).createFolder(remotePath,
+                new WebDAVClient.WebDAVCallback<Integer>() {
+            @Override
+            public void onSuccess(Integer code) {
+                mainHandler.post(() -> {
+                    dismissLoading();
+                    onRemoteFolderCreated(folderName, serverAtRequest, dirAtRequest, code);
+                });
+            }
+
+            @Override
+            public void onError(Exception e) {
+                if (rlog != null) {
+                    rlog.w(TAG, "新建文件夹失败: " + remotePath + " | "
+                            + (e == null ? "null" : e.getMessage()));
+                }
+                mainHandler.post(() -> {
+                    dismissLoading();
+                    toast(createFolderFailureMessage(e), Toast.LENGTH_LONG);
+                });
+            }
+        });
+    }
+
+    /**
+     * 新建成功后的收尾。
+     *
+     * 目录缓存（内存 + 磁盘快照）必须失效，否则 5 分钟内再进这个目录，
+     * 命中的是「新建之前」的那份数据，刚建好的文件夹反而不见了 ——
+     * 与删除后必须失效是同一个原因。
+     */
+    private void onRemoteFolderCreated(String folderName, ServerProfile server,
+                                       String dirAtRequest, int httpCode) {
+        if (rlog != null) {
+            rlog.i(TAG, "新建文件夹成功: " + folderName
+                    + " | HTTP " + httpCode + " | dir=" + dirAtRequest);
+        }
+
+        String cacheKey = cacheKeyOf(server, dirAtRequest);
+        invalidateDirCache(cacheKey);
+        cacheManager.deleteSnapshot(cacheKey);
+
+        // 只有用户仍停在同一台服务器的同一目录才立刻重载；
+        // 已经切走的话交给下一次进入该目录时加载，避免把别的目录刷成当前目录
+        boolean sameServer = currentServer != null
+                && server != null
+                && currentServer.getId() != null
+                && currentServer.getId().equals(server.getId());
+        if (sameServer && dirAtRequest != null && dirAtRequest.equals(currentPath)) {
+            loadCurrentPath();
+        }
+
+        toast(getString(R.string.msg_folder_created, folderName), Toast.LENGTH_SHORT);
+    }
+
+    /**
+     * 把新建失败的原因翻译成人话。
+     *
+     * 401 / 403 / 429 与删除是同一组病因；405 / 409 / 415 则是 MKCOL 特有的：
+     * 目标已存在（或服务端不支持该方法）、父目录不存在、请求体不被接受 ——
+     * 只丢一句 "HTTP 4xx" 用户没法排障。
+     */
+    private String createFolderFailureMessage(Exception e) {
+        String msg = (e == null || e.getMessage() == null) ? "未知错误" : e.getMessage();
+        if (isRateLimitError(e)) return "服务器繁忙（429），请稍后再试";
+        if (msg.contains("401")) return "认证失败（401）：请检查服务器的用户名/密码";
+        if (msg.contains("403")) return "无权限（403）：服务端需要 WebDAV 写入/管理权限";
+        if (msg.contains("405")) return "服务端拒绝创建（405）：同名条目已存在，或该服务端不支持新建文件夹";
+        if (msg.contains("409")) return "服务端拒绝创建（409）：上级目录不存在";
+        if (msg.contains("415")) return "服务端拒绝创建（415）：不接受 MKCOL 请求体";
+        if (msg.contains("507")) return "空间不足（507）：云盘已满";
+        return "新建文件夹失败: " + msg;
+    }
+
     private void showFileContextMenu(WebDAVFile file, View view) {
         new AlertDialog.Builder(this)
                 .setTitle(file.getDisplayName())
@@ -1937,12 +2158,34 @@ public class MainActivity extends AppCompatActivity implements
         getMenuInflater().inflate(R.menu.main_menu, menu);
         return true;
     }
+
+    /**
+     * 每次准备选项菜单时对齐「新建文件夹」的可见性。
+     *
+     * 判定依据只有一个：是否已进入某台服务器（currentServer != null）。
+     * 根目录那一层列的是服务器本身，不是任何一台服务器的目录树 ——
+     * 在那里新建文件夹没有落点（与上传按钮的前置条件同一个道理）。
+     */
+    @Override
+    public boolean onPrepareOptionsMenu(Menu menu) {
+        MenuItem newFolder = menu.findItem(R.id.menu_new_folder);
+        if (newFolder != null) {
+            boolean inServer = currentServer != null;
+            newFolder.setVisible(inServer);
+            menuInServerState = inServer;
+        }
+        return super.onPrepareOptionsMenu(menu);
+    }
     
     @Override
     public boolean onOptionsItemSelected(@NonNull MenuItem item) {
         int id = item.getItemId();
         
-        if (id == R.id.menu_locate_current) {
+        if (id == R.id.menu_new_folder) {
+            // 新建文件夹：在当前服务器的当前目录下发 MKCOL（直接落到服务器上）
+            showNewFolderDialog();
+            return true;
+        } else if (id == R.id.menu_locate_current) {
             // 定位到当前正在播放的歌曲。
             // 停留在服务器根目录时该功能无意义（那里列的是服务器不是曲目），
             // 直接给出提示而不是静默什么都不做。

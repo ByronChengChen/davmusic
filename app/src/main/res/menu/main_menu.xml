@@ -2,6 +2,14 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
+    <!-- 新建文件夹：只在【已进入某台服务器】时可见（见 MainActivity.onPrepareOptionsMenu）。
+         根目录列的是服务器本身，那一层没有"文件夹"可新建。 -->
+    <item
+        android:id="@+id/menu_new_folder"
+        android:title="@string/menu_new_folder"
+        android:icon="@drawable/ic_new_folder"
+        app:showAsAction="always" />
+
     <item
         android:id="@+id/menu_refresh"
         android:title="@string/menu_refresh"

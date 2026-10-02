@@ -397,6 +397,78 @@ public class WebDAVClient {
         });
     }
 
+    // 新建远端文件夹
+    /**
+     * 在远端新建一个文件夹（WebDAV MKCOL，RFC 4918 §9.3）。
+     *
+     * 要点：
+     *  - 路径处理与上传/删除完全一致（统一走 getDownloadUrl 逐段编码），
+     *    目录 URL 必须带尾斜杠，否则部分服务端会 301 到规范地址。
+     *  - 只建【一层】，不递归建父目录：父目录不存在时服务端回 409，
+     *    交给调用方提示，而不是替用户猜一条路径出来。
+     *  - 请求体为空（Content-Length: 0）。MKCOL 本就不需要 body，
+     *    带内容的请求会被部分服务端判为 415。
+     *  - 不做自动重试：与全局策略一致（见 MainActivity 中关于 429 的说明），
+     *    服务端的登录锁经不起客户端重试。
+     *  - 状态码原样交回调用方：401/403 是凭据或写入权限，405 是已存在
+     *    或该服务端不支持 MKCOL，409 是父目录不存在 —— 只回 true/false
+     *    用户分不清错在哪。
+     *
+     * @param remotePath 相对路径（不含 baseUrl），如 "music/新歌"
+     * @param callback   成功时回传 HTTP 状态码（WebDAV 正常应答为 201）
+     */
+    public void createFolder(String remotePath, final WebDAVCallback<Integer> callback) {
+        if (!isConfigured()) {
+            callback.onError(new Exception("WebDAV client not configured"));
+            return;
+        }
+        // 空路径会退化成对服务器根目录发 MKCOL —— 必须挡住，
+        // 根目录是既有事实，不是能"新建"的对象
+        if (remotePath == null || trimSlashes(remotePath).isEmpty()) {
+            callback.onError(new Exception("文件夹路径为空"));
+            return;
+        }
+
+        String url = getDownloadUrl(remotePath);
+        if (!url.endsWith("/")) {
+            url += "/";
+        }
+
+        Request request = new Request.Builder()
+                .url(url)
+                .method("MKCOL", RequestBody.create("", MediaType.parse("text/plain")))
+                .header("Authorization", getBasicAuthHeader())
+                .build();
+
+        client.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                callback.onError(e);
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) {
+                try {
+                    if (response.isSuccessful()) {
+                        // 与删除同一道防御：重定向会把非 GET/HEAD 请求改写，
+                        // 此时 2xx 并不能证明请求真的是 MKCOL、也证明不了建成了
+                        if (!"MKCOL".equals(response.request().method())) {
+                            callback.onError(new Exception(
+                                    "服务端重定向后未执行创建（" + response.request().method() + "）"));
+                            return;
+                        }
+                        callback.onSuccess(response.code());
+                    } else {
+                        callback.onError(new Exception("HTTP " + response.code()
+                                + ": " + response.message()));
+                    }
+                } finally {
+                    response.close();
+                }
+            }
+        });
+    }
+
     /** 进度回调切到主线程，避免调用方在子线程更新 UI */
     private void notifyProgressOnMain(final ProgressCallback callback, final int percent) {
         new android.os.Handler(android.os.Looper.getMainLooper())

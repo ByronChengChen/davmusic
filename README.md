@@ -43,6 +43,7 @@
 **文件操作**
 
 - 上传文件到当前目录（通过系统文件选择器，无需存储权限）
+- 进入某台服务器后，可在右上角新建文件夹（WebDAV MKCOL，直接建在服务器上）
 - 删除远端 / 本地文件
 - 查看文件详细信息
 - 清空缓存
@@ -60,7 +61,7 @@
 | 最低版本 | Android 8.0 (API 26) |
 | 目标版本 | Android 14 (API 34) |
 | 语言 | Java |
-| 服务端 | 任意 WebDAV 服务器（Basic 认证，用到 PROPFIND / GET / PUT / DELETE） |
+| 服务端 | 任意 WebDAV 服务器（Basic 认证，用到 PROPFIND / GET / PUT / DELETE / MKCOL） |
 
 **权限说明：** 只要网络相关权限（INTERNET / ACCESS_NETWORK_STATE）+ 前台服务与唤醒锁
 （用于后台播放）。**不申请存储权限** —— 下载写入 App 私有目录，上传走系统文件选择器由系统代读。
