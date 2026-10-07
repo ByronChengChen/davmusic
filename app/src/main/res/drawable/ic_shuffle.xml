@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 随机播放：每次挑一首与当前不同的 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FF757575"
+        android:pathData="M10.59,9.17L5.41,4L4,5.41L9.17,10.58L10.59,9.17M14.5,4L16.54,6.04L4,18.59L5.41,20L17.96,7.46L20,9.5V4H14.5M14.83,13.41L13.42,14.83L16.59,18H14.5V20H20V14.5H18V16.59L14.83,13.41Z" />
+</vector>

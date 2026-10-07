@@ -189,6 +189,18 @@
             android:orientation="horizontal"
             android:gravity="center">
             
+            <!-- 播放模式：点击循环切换 顺序 / 列表循环 / 单曲循环 / 随机。
+                 图标随当前模式变化（见 MainActivity.refreshPlayModeButton） -->
+            <ImageButton
+                android:id="@+id/playModeButton"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:src="@drawable/ic_repeat"
+                android:contentDescription="@string/btn_play_mode"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:scaleType="center"
+                android:padding="6dp" />
+            
             <!-- 上一首 -->
             <ImageButton
                 android:id="@+id/previousButton"

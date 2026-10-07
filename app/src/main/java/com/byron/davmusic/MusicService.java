@@ -564,6 +564,13 @@ public class MusicService extends Service
     }
 
     @Override
+    public void onPlayModeChanged(int mode) {
+        // 通知栏暂无播放模式按钮，因此不需要刷新通知；
+        // 这里只记日志 —— 真机排障时要能从日志看出模式是在什么时候被切的
+        rlog.i(TAG, "onPlayModeChanged: " + MusicPlayer.modeName(mode));
+    }
+
+    @Override
     public void onError(String error) {
         rlog.e(TAG, "播放错误: " + error);
         refreshNotification();

@@ -59,11 +59,72 @@ public class MusicPlayer {
     private List<OnPlaybackListener> listeners = new ArrayList<>();
     /** 远程日志：只记录，不影响播放逻辑 */
     private RemoteLogger rlog;
-    
+
+    // ---- 播放模式（顺序 / 列表循环 / 单曲循环 / 随机） ----
+
+    /** 顺序播放：播到列表末尾即停止 */
+    public static final int MODE_SEQUENTIAL = 0;
+    /** 列表循环：播到末尾回到第一首。默认值 —— 保持本次改动之前的既有行为 */
+    public static final int MODE_LIST_LOOP = 1;
+    /** 单曲循环：同一首反复播放 */
+    public static final int MODE_SINGLE_LOOP = 2;
+    /** 随机播放：每次挑一首与当前不同的 */
+    public static final int MODE_SHUFFLE = 3;
+    /** 模式总数，UI 按它循环切换 */
+    public static final int MODE_COUNT = 4;
+
+    private static final String PREF_NAME = "player_prefs";
+    private static final String PREF_KEY_PLAY_MODE = "play_mode";
+
+    /** 随机源。只被 nextIndexOf() 使用 */
+    private static final java.util.Random RANDOM = new java.util.Random();
+
+    private int playMode = MODE_LIST_LOOP;
+
+    /**
+     * 已挂载的预加载实例在 playlist 中的下标（-1 = 没有）。
+     *
+     * 为什么必须记下来：播完时不能再按 "currentPosition + 1" 推进 ——
+     * 随机模式下预加载的是随机挑的那一首，+1 会让【状态与声音对不上】
+     * （界面显示 A，耳朵里是 B），下一次切歌还会从错的位置继续。
+     */
+    private int preloadedPosition = -1;
+
+    /**
+     * 正在 prepareAsync 中的预加载目标下标（-1 = 没有在途的）。
+     *
+     * 和 preloadedPosition 的区别：一个是"已在途"，一个是"已挂上"。
+     * 切换模式时要用它俩判断【新目标是否与原有目标相同】—— 相同就不动，
+     * 避免白白重拉一路流（服务端对请求量很敏感，见 AGENTS.md 网络策略）。
+     */
+    private int preparingPosition = -1;
+
+    /**
+     * 预加载代号。
+     *
+     * prepareAsync() 是异步的：切换播放模式会取消旧目标并重挂新目标，
+     * 但旧目标可能【正在 prepare】。若不加代号，旧目标的 onPrepared 会在
+     * 新目标之后挂上去，把已经算好的下一首换回旧模式的曲目。
+     * 每次重新计算目标（含取消）都自增，回调里对不上就丢弃自己。
+     */
+    private int preloadGeneration = 0;
+
+    /**
+     * 已取消、但暂时不宜立刻 release 的预加载实例。
+     *
+     * 为什么不当场释放：setNextMediaPlayer(null) 之后，native 层的切换
+     * 有可能【刚刚开始】—— 此刻 release 会掐断刚开始播的那一首。
+     * 因此先记为待回收，等下一次 stop()/切歌/释放时再真正回收。
+     * 同一时刻最多只有一个，开销可忽略。
+     */
+    private android.media.MediaPlayer pendingReleasePlayer;
+
     public interface OnPlaybackListener {
         void onTrackChanged(WebDAVFile track);
         void onPlayStateChanged(boolean isPlaying);
         void onProgress(int position, int duration);
+        /** 播放模式变化（UI 据此换图标；见 MODE_* 常量） */
+        void onPlayModeChanged(int mode);
         void onError(String error);
     }
     
@@ -72,6 +133,7 @@ public class MusicPlayer {
         this.handler = new Handler(Looper.getMainLooper());
         this.rlog = RemoteLogger.getInstance(this.context);
         rlog.i(TAG, "MusicPlayer 初始化");
+        loadPlayMode();
         initWakeLock();
         initAudioFocus();
         initMediaPlayer();
@@ -229,6 +291,9 @@ public class MusicPlayer {
             isPreparing = false;
             Log.d(TAG, "MediaPlayer prepared, starting playback");
             mp.start();
+            // 播放模式：新建的 MediaPlayer 循环标记默认为关，
+            // 每次准备完成都要按当前模式重设一遍（单曲循环靠它无缝重播）
+            applyLoopingTo(mp);
             notifyPlayStateChanged(true);
             rlog.i(TAG, "onPrepared 触发: mp=" + mp.hashCode()
                     + " | 当前 mediaPlayer=" + (mediaPlayer == null ? "null" : mediaPlayer.hashCode()));
@@ -256,7 +321,24 @@ public class MusicPlayer {
             handler.post(() -> {
                 rlog.i(TAG, "onCompletion handler 执行 (post 未被延迟丢弃)");
 
+                // 【播放模式】单曲循环走 MediaPlayer 原生循环：循环期间
+                // onCompletion 根本不会触发。这里是竞态兜底 —— 若刚好在
+                // 末尾才切到单曲循环，重播当前这首，而不是继续换歌。
+                if (playMode == MODE_SINGLE_LOOP) {
+                    rlog.i(TAG, "单曲循环兜底：重播当前曲目");
+                    if (playlist != null && currentPosition >= 0
+                            && currentPosition < playlist.size()) {
+                        playFile(playlist.get(currentPosition));
+                    } else {
+                        notifyPlayStateChanged(false);
+                    }
+                    return;
+                }
+
                 if (playlist == null || playlist.size() <= 1) {
+                    // 注意：单曲循环已在上面处理，所以走到这里说明
+                    // "列表只有一首且非单曲循环" —— 保持原有行为：播完停止。
+                    // （列表循环下想反复听这一首，请选单曲循环）
                     rlog.i(TAG, "单曲或空列表，停止切歌");
                     notifyPlayStateChanged(false);
                     return;
@@ -271,12 +353,21 @@ public class MusicPlayer {
                     // 这里只做状态同步：推进索引、通知 UI、再预加载下下一首。
                     rlog.i(TAG, "预加载已接管播放，仅同步状态（不重建 MediaPlayer）");
 
-                    currentPosition = (currentPosition + 1) % playlist.size();
+                    // 推进到【预加载时按当时模式算出的那一首】，而不是 +1：
+                    // 随机模式下 +1 会让界面显示的曲目与实际播放的声音对不上
+                    if (preloadedPosition >= 0 && preloadedPosition < playlist.size()) {
+                        currentPosition = preloadedPosition;
+                    } else {
+                        currentPosition = (currentPosition + 1) % playlist.size();
+                    }
+                    preloadedPosition = -1;
 
                     // 接手播放的实例已成为当前实例
                     mediaPlayer = preloadedPlayer;
                     preloadedPlayer = null;
                     bindCurrentPlayerListeners();
+                    // 新实例的循环标记默认为关，按当前模式重设
+                    applyLoopingToCurrentPlayer();
 
                     WebDAVFile now = playlist.get(currentPosition);
                     currentUrl = resolvePlayUrl(now);
@@ -288,9 +379,18 @@ public class MusicPlayer {
                     return;
                 }
 
-                // 没有预加载（首次播放、预加载失败、或单曲）：走常规切歌流程
-                rlog.i(TAG, "无预加载，走常规切歌流程");
-                playNext();
+                // 没有预加载（首次播放、预加载失败、或模式使然）：按当前模式算下一首。
+                // 注意这里【不能】调 playNext() —— 那是"用户主动切歌"的语义，
+                // 它一定会换一首；而顺序播放到末尾时我们必须停下来。
+                int nextPos = nextIndexOf(playMode, currentPosition, playlist.size(), false);
+                if (nextPos < 0) {
+                    rlog.i(TAG, "顺序播放已到末尾，停止切歌");
+                    notifyPlayStateChanged(false);
+                    return;
+                }
+                rlog.i(TAG, "无预加载，按模式切到下标 " + nextPos);
+                currentPosition = nextPos;
+                playFile(playlist.get(currentPosition));
             });
         });
         
@@ -518,10 +618,23 @@ public class MusicPlayer {
      */
     private void prepareNextTrack() {
         if (mediaPlayer == null) return;
-        if (playlist == null || playlist.size() <= 1) return;
+        if (playlist == null || playlist.isEmpty()) return;
         if (currentPosition < 0 || currentPosition >= playlist.size()) return;
 
-        int nextPos = (currentPosition + 1) % playlist.size();
+        // 目标由【当前模式】决定：随机模式挑随机的一首；单曲循环与
+        // "顺序播放的最后一首"返回 -1，即不预加载（前者交给 setLooping
+        // 原生无缝重播，后者本来就该停）。
+        final int nextPos = nextIndexOf(playMode, currentPosition, playlist.size(), false);
+        if (nextPos < 0) {
+            rlog.i(TAG, "按当前模式没有下一首，不预加载: mode=" + modeName(playMode));
+            return;
+        }
+
+        // 本次预加载的代号：模式切换会取消旧目标并重挂，
+        // 旧目标的 onPrepared 靠它识别出"我已经过期了"
+        final int gen = ++preloadGeneration;
+        preparingPosition = nextPos;
+
         WebDAVFile nextTrack = playlist.get(nextPos);
         if (nextTrack == null) return;
 
@@ -561,27 +674,42 @@ public class MusicPlayer {
             // 必须等 prepare 完成才能交给 setNextMediaPlayer
             next.setOnPreparedListener(prepared -> {
                 try {
-                    if (mediaPlayer == null) {
+                    // 过期检查①：本次预加载是否已被取消/重挂（例如用户切了播放模式）。
+                    // 注意这里要【先】判代号：过期说明已有更新的预加载接管了
+                    // preparingPosition，此时不能去动它。
+                    if (gen != preloadGeneration) {
+                        Log.d(TAG, "预加载已过期（模式或目标已变），丢弃: " + nextName);
                         prepared.release();
                         return;
                     }
-                    // 二次确认：当前曲目仍未切换（避免用户已手动切歌后误挂）
+                    if (mediaPlayer == null) {
+                        clearPreparingPosition(nextPos);
+                        prepared.release();
+                        return;
+                    }
+                    // 过期检查②：当前曲目仍未切换（避免用户已手动切歌后误挂）
                     String expect = resolvePlayUrl(
                             playlist != null && currentPosition >= 0
                                     && currentPosition < playlist.size()
                                     ? playlist.get(currentPosition) : null);
                     if (expect == null || !expect.equals(currentUrl)) {
                         Log.d(TAG, "当前曲目已变化，丢弃预加载结果: " + nextName);
+                        clearPreparingPosition(nextPos);
                         prepared.release();
                         return;
                     }
                     mediaPlayer.setNextMediaPlayer(prepared);
                     preloadedPlayer = prepared;
+                    // 记下"这一首在列表里的位置"：播完时按它推进索引，
+                    // 随机模式下才能让界面与实际播放保持一致
+                    preloadedPosition = nextPos;
+                    clearPreparingPosition(nextPos);
                     Log.d(TAG, "已预加载下一首: " + nextName);
-                    rlog.i(TAG, "预加载成功: " + nextName);
+                    rlog.i(TAG, "预加载成功: " + nextName + " (下标 " + nextPos + ")");
                 } catch (Exception ex) {
                     rlog.w(TAG, "挂载预加载失败: " + ex.getClass().getSimpleName()
                             + " / " + ex.getMessage());
+                    clearPreparingPosition(nextPos);
                     try { prepared.release(); } catch (Exception ignored) {}
                     preloadedPlayer = null;
                 }
@@ -915,6 +1043,221 @@ public class MusicPlayer {
             }
             preloadedPlayer = null;
         }
+        preloadedPosition = -1;
+        preparingPosition = -1;
+        // 让仍在 prepareAsync 中的目标作废：此时 mediaPlayer 已被 reset/重建，
+        // 旧目标再挂上来只会挂到一个 Idle 实例上
+        preloadGeneration++;
+        // 停止/切歌意味着切换窗口已经过去，之前"不敢当场释放"的实例现在可以回收
+        recyclePendingRelease();
+    }
+
+    /** 清掉"在途"标记；只在确认这个下标仍归本次预加载所有时调用 */
+    private void clearPreparingPosition(int pos) {
+        if (preparingPosition == pos) preparingPosition = -1;
+    }
+
+    /**
+     * 取消已挂载的预加载，但【不打断当前正在播的这一首】。
+     *
+     * 依据官方文档：setNextMediaPlayer(null) 表示"播完不接下一首"。
+     * 切换播放模式时必须调用 —— 已挂载的下一首是按【旧模式】挑的：
+     * 从列表循环切到单曲循环时若不清掉，播完仍会照样换歌，
+     * 用户看到的就是"选了单曲循环却还是跳走了"。
+     */
+    private void cancelPreloadedTrack() {
+        if (preloadedPlayer != null && mediaPlayer != null) {
+            try {
+                mediaPlayer.setNextMediaPlayer(null);
+            } catch (Exception e) {
+                Log.w(TAG, "取消预加载失败: " + e.getMessage());
+                rlog.w(TAG, "取消预加载失败: " + e.getMessage());
+            }
+        }
+
+        // 让仍在 prepareAsync 中的旧目标作废（见 preloadGeneration）
+        preloadGeneration++;
+        preloadedPosition = -1;
+        preparingPosition = -1;
+
+        // 当场 release 有风险：native 层的切换可能刚刚开始。
+        // 先记为待回收，交给下一个安全点（stop/切歌/释放）处理。
+        if (preloadedPlayer != null) {
+            recyclePendingRelease();
+            pendingReleasePlayer = preloadedPlayer;
+            preloadedPlayer = null;
+        }
+    }
+
+    /** 回收"待回收"的预加载实例（此刻它一定已经不在切换窗口内了） */
+    private void recyclePendingRelease() {
+        if (pendingReleasePlayer != null) {
+            try {
+                pendingReleasePlayer.release();
+            } catch (Exception ignored) {
+            }
+            pendingReleasePlayer = null;
+        }
+    }
+
+    // ---- 播放模式：查询与切换 ----
+
+    public int getPlayMode() {
+        return playMode;
+    }
+
+    /** 切到下一个模式（顺序 → 列表循环 → 单曲循环 → 随机 → 顺序），返回切换后的模式 */
+    public int cyclePlayMode() {
+        setPlayMode((playMode + 1) % MODE_COUNT);
+        return playMode;
+    }
+
+    /**
+     * 切换播放模式，并让它【立即】对正在播的这一首生效。
+     *
+     * 为什么必须立即生效：否则用户会看到"选了单曲循环却还是换歌了"、
+     * "切回列表循环却还在单曲里打转"。做法两步：
+     *   ① 单曲循环交给 MediaPlayer.setLooping(true)，native 层无缝重播，
+     *      循环点不需要重新请求网络；离开单曲循环时关掉它，
+     *      末尾的 onCompletion 才会照常触发（文档：循环中不会启动 next player）。
+     *   ② 其余模式之间切换时，已挂载的下一首可能是按旧模式挑的，
+     *      必须取消（setNextMediaPlayer(null)）再按新模式重挂 ——
+     *      但仅在【新目标与原有目标不同】时才做，免得白白多拉一路流。
+     */
+    public void setPlayMode(int mode) {
+        if (mode < 0 || mode >= MODE_COUNT || mode == playMode) return;
+
+        int old = playMode;
+        playMode = mode;
+        persistPlayMode();
+        rlog.i(TAG, "播放模式切换: " + modeName(old) + " → " + modeName(mode));
+
+        // 新模式想要的下一首
+        int size = (playlist == null) ? 0 : playlist.size();
+        int desired = nextIndexOf(playMode, currentPosition, size, false);
+        // 当前"已挂上或正在准备"的目标（两者最多只有一个有效）
+        int currentTarget = (preloadedPosition >= 0) ? preloadedPosition : preparingPosition;
+
+        if (desired != currentTarget) {
+            // 旧目标作废，按新模式重挂
+            cancelPreloadedTrack();
+            if (desired >= 0) {
+                prepareNextTrack();
+            }
+        } else {
+            // 目标没变就别动预加载 —— 重挂会重新拉一路流，
+            // 服务端对请求量敏感（见 AGENTS.md 的网络策略）
+            rlog.i(TAG, "下一首目标未变(下标 " + desired + ")，沿用已有预加载");
+        }
+
+        // 循环标记每次都要重设：进单曲循环要开，离开要关
+        applyLoopingToCurrentPlayer();
+        notifyPlayModeChanged(playMode);
+    }
+
+    /**
+     * 计算"下一首"的下标。
+     *
+     * 做成纯静态函数（可单测）而不是散在两个调用点里，是因为它必须同时
+     * 服务于【预加载】与【播完切歌】两处：任何一处算法不一致，就会出现
+     * "预加载的是 A、状态推进到 B"这类错位。
+     *
+     * @param mode          播放模式（MODE_* 常量）
+     * @param currentPos    当前下标
+     * @param size          播放列表长度
+     * @param userInitiated true = 用户主动点「下一首」/ 蓝牙双击
+     *                      false = 一首播完自动接续
+     * @return 下一首下标；-1 表示按当前模式不应继续（顺序播放到底、单曲循环自动接续）
+     */
+    public static int nextIndexOf(int mode, int currentPos, int size, boolean userInitiated) {
+        if (size <= 0) return -1;
+        if (currentPos < 0 || currentPos >= size) return 0;
+
+        // 单曲循环：自动接续由 setLooping 在 native 层完成，这里不作为。
+        // 但用户主动点「下一首」应当真的换一首，否则按钮像坏的。
+        if (mode == MODE_SINGLE_LOOP && !userInitiated) return -1;
+
+        if (size == 1) {
+            // 列表只有一首：手动切歌只能回到它自己；
+            // 自动接续返回 -1，保持"单曲播完即停"的原有行为
+            //（想反复听这一首，请选单曲循环）
+            return userInitiated ? 0 : -1;
+        }
+
+        if (mode == MODE_SHUFFLE) {
+            // 随机：避开当前这一首（列表 ≥2 首，一定能挑到别的）
+            int idx;
+            do {
+                idx = RANDOM.nextInt(size);
+            } while (idx == currentPos);
+            return idx;
+        }
+
+        int next = currentPos + 1;
+        if (next >= size) {
+            // 到末尾：顺序播放（自动）停止，其余情况回到开头
+            if (mode == MODE_SEQUENTIAL && !userInitiated) return -1;
+            return 0;
+        }
+        return next;
+    }
+
+    /** 模式名（仅用于日志与远程诊断；界面文案见 strings.xml 的 play_mode_*） */
+    public static String modeName(int mode) {
+        switch (mode) {
+            case MODE_SEQUENTIAL: return "顺序播放";
+            case MODE_LIST_LOOP: return "列表循环";
+            case MODE_SINGLE_LOOP: return "单曲循环";
+            case MODE_SHUFFLE: return "随机播放";
+            default: return "未知模式(" + mode + ")";
+        }
+    }
+
+    /**
+     * 把当前模式要求的循环标记写到指定实例上。
+     *
+     * 必须每个实例都重设：新建的 MediaPlayer 循环标记默认为关，
+     * 而切歌/切模式都会重建或换用实例（含 setNextMediaPlayer 顶上来的那个）。
+     */
+    private void applyLoopingTo(android.media.MediaPlayer mp) {
+        if (mp == null) return;
+        boolean shouldLoop = (playMode == MODE_SINGLE_LOOP);
+        try {
+            mp.setLooping(shouldLoop);
+        } catch (IllegalStateException e) {
+            // Idle/Error 状态下不允许设置。不必补救 ——
+            // 下次 onPrepared 会按当时的模式再设一遍。
+            Log.d(TAG, "setLooping 当前状态不允许，稍后重设: " + e.getMessage());
+        }
+    }
+
+    private void applyLoopingToCurrentPlayer() {
+        applyLoopingTo(mediaPlayer);
+    }
+
+    private void persistPlayMode() {
+        try {
+            context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+                    .edit()
+                    .putInt(PREF_KEY_PLAY_MODE, playMode)
+                    .apply();
+        } catch (Exception e) {
+            Log.w(TAG, "保存播放模式失败: " + e.getMessage());
+        }
+    }
+
+    /** 读取上次选择的播放模式（默认列表循环 = 本功能之前的既有行为） */
+    private void loadPlayMode() {
+        int saved = MODE_LIST_LOOP;
+        try {
+            saved = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+                    .getInt(PREF_KEY_PLAY_MODE, MODE_LIST_LOOP);
+        } catch (Exception e) {
+            Log.w(TAG, "读取播放模式失败，用默认值: " + e.getMessage());
+        }
+        if (saved < 0 || saved >= MODE_COUNT) saved = MODE_LIST_LOOP;
+        playMode = saved;
+        rlog.i(TAG, "播放模式: " + modeName(playMode));
     }
     
     /**
@@ -926,13 +1269,15 @@ public class MusicPlayer {
      */
     public void playNext() {
         rlog.i(TAG, "playNext 进入: pos=" + currentPosition
-                + " size=" + (playlist == null ? -1 : playlist.size()));
+                + " size=" + (playlist == null ? -1 : playlist.size())
+                + " mode=" + modeName(playMode));
         if (playlist == null || playlist.isEmpty()) return;
-        if (currentPosition < 0 || currentPosition >= playlist.size()) {
-            currentPosition = 0;
-        } else {
-            currentPosition = (currentPosition + 1) % playlist.size();
-        }
+
+        // 用户主动切歌：任何模式下都要真的换一首（单曲循环下也是），
+        // 否则按钮会像坏的。随机模式下这里就是"随机下一首"。
+        int nextPos = nextIndexOf(playMode, currentPosition, playlist.size(), true);
+        if (nextPos < 0) return;
+        currentPosition = nextPos;
         playFile(playlist.get(currentPosition));
     }
 
@@ -1018,6 +1363,12 @@ public class MusicPlayer {
             listener.onError(error);
         }
     }
+
+    private void notifyPlayModeChanged(int mode) {
+        for (OnPlaybackListener listener : listeners) {
+            listener.onPlayModeChanged(mode);
+        }
+    }
     
     public void release() {
         releaseTransitionWakeLock();
@@ -1032,6 +1383,9 @@ public class MusicPlayer {
             mediaPlayer.release();
             mediaPlayer = null;
         }
+
+        // 当前实例已释放，预加载实例（含"待回收"那个）此时释放是安全的
+        releasePreloadedPlayer();
         
         listeners.clear();
         instance = null;

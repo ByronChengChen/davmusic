@@ -513,6 +513,39 @@
 
 ---
 
+## 任务 22 — 播放模式（顺序 / 列表循环 / 单曲循环 / 随机）`[x]`
+
+**目标**：把 README 里那句"随机/循环"变成真正可切换、可记住、即时生效的功能（R5.11–R5.14）
+
+**背景**：v1.30 的 README 写有"随机/循环"，但代码里**从未实现过** ——
+`playNext()` 只有 `(pos + 1) % size`，即"顺序播放 + 播完回到开头"，没有任何可切换的模式；
+requirements 曾把「播放模式」列在范围外。这次是补做，不是恢复被删的功能。
+
+**实现**
+- [x] 四个模式：`MODE_SEQUENTIAL` / `MODE_LIST_LOOP`（默认）/ `MODE_SINGLE_LOOP` / `MODE_SHUFFLE`
+- [x] `nextIndexOf(mode, pos, size, userInitiated)` 抽成**纯静态函数**，预加载与播完切歌共用同一套决策
+- [x] 单曲循环走 `MediaPlayer.setLooping(true)`：native 无缝重播，循环点不重新取流
+- [x] 切模式立即生效：`setNextMediaPlayer(null)` 取消旧目标的预加载 → 按新模式重挂
+      （目标未变则不重挂，避免白白多拉一路流）
+- [x] 预加载记下标 `preloadedPosition`：播完按它推进索引（随机模式下不能用 +1）
+- [x] 在途预加载用 `preloadGeneration` 作废，避免旧目标的 `onPrepared` 覆盖新目标
+- [x] 取消预加载后不当场 `release()`，记入 `pendingReleasePlayer` 待安全点回收
+- [x] 模式持久化（`player_prefs` / `play_mode`）；默认列表循环＝改动前的既有行为
+- [x] 迷你播放器新增播放模式按钮（4 个图标随模式切换 + Toast 提示 + contentDescription）
+- [x] `OnPlaybackListener.onPlayModeChanged`，MainActivity 与 MusicService 均已实现
+- [x] README 的不实描述改为与实现一致；spec 的「范围外」条目替换为真正未做的部分
+
+**产出**：`MusicPlayer.java`, `MainActivity.java`, `MusicService.java`, `activity_main.xml`,
+`strings.xml`, `ic_sequential/ic_repeat/ic_repeat_one/ic_shuffle.xml`（新增 4 个矢量图标）
+
+**测试**：`nextIndexOf()` 是纯函数，可直接用普通 JUnit 覆盖（用例清单见 design.md 8.2）；
+但真实的接续行为（取消/重挂预加载、`setLooping` 无缝重播）**只能真机验证**
+
+**演示**：播放一首 → 切到单曲循环 → 该曲无缝重播；切到顺序播放 → 放到最后一首停止；
+切到随机 → 每次换歌都不同；重启 App → 模式仍在
+
+---
+
 ## 依赖关系
 
 ```
@@ -533,6 +566,7 @@
 任务12 (前台服务) ← 任务20 (播放健壮性)
 任务8 (快照) ← 任务15 (离线索引) ← 任务21 (渲染修复)
 任务12/13/14 ← 任务17 (远程日志) → 支撑 任务20/21 的根因定位
+任务7 (播放) ← 任务22 (播放模式) ← 依赖 任务12 (前台服务/MediaSession 的切歌链路)
 ```
 
 **可并行组**：任务 2 与任务 3 相互独立；任务 6、7、8、9 在 2+3 完成后可并行。
@@ -545,7 +579,7 @@
 |------|------|
 | 脚手架与核心功能（1–9） | 全部完成 |
 | CI 与产物（10） | 完成（可出包，真机可装） |
-| 单元测试（11） | **未开始 —— 唯一缺口** |
-| 真机迭代增强（12–21） | 全部完成 |
+| 单元测试（11） | **未开始 —— 唯一缺口**（任务 22 的 `nextIndexOf()` 已具备纯函数条件，可优先补） |
+| 真机迭代增强（12–22） | 全部完成 |
 
 **代码规模**：15 个类 / 7634 行（初版为 9 个类 / 2783 行）

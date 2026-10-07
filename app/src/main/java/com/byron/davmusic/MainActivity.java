@@ -58,6 +58,8 @@ public class MainActivity extends AppCompatActivity implements
     private ImageButton playPauseButton;
     private ImageButton previousButton;
     private ImageButton nextButton;
+    /** 播放模式按钮：点击循环切换（顺序 / 列表循环 / 单曲循环 / 随机） */
+    private ImageButton playModeButton;
     private SeekBar playerProgressBar;
     /** 播放时间文本：当前进度 / 总时长 */
     private TextView playerCurrentTimeText;
@@ -323,6 +325,7 @@ public class MainActivity extends AppCompatActivity implements
         playPauseButton = findViewById(R.id.playPauseButton);
         previousButton = findViewById(R.id.previousButton);
         nextButton = findViewById(R.id.nextButton);
+        playModeButton = findViewById(R.id.playModeButton);
         playerProgressBar = findViewById(R.id.playerProgressBar);
         playerCurrentTimeText = findViewById(R.id.playerCurrentTimeText);
         playerTotalTimeText = findViewById(R.id.playerTotalTimeText);
@@ -351,6 +354,13 @@ public class MainActivity extends AppCompatActivity implements
         playPauseButton.setOnClickListener(v -> togglePlayPause());
         previousButton.setOnClickListener(v -> playPrevious());
         nextButton.setOnClickListener(v -> playNext());
+
+        // 播放模式：点击循环切换。模式会被 MusicPlayer 记住（下次启动仍在），
+        // 这里弹一条提示 —— 图标只有形状差别，不提示用户不知道切到哪个了。
+        playModeButton.setOnClickListener(v -> {
+            int mode = musicPlayer.cyclePlayMode();
+            toast(getString(R.string.btn_play_mode) + "：" + playModeLabel(mode));
+        });
         
         miniPlayerLayout.setOnClickListener(v -> {
             // 可以在这里实现点击播放器展开详细播放界面的功能
@@ -2034,6 +2044,38 @@ public class MainActivity extends AppCompatActivity implements
     private void playNext() {
         musicPlayer.playNext();
     }
+
+    /** 播放模式的界面文案（与图标一一对应） */
+    private String playModeLabel(int mode) {
+        switch (mode) {
+            case MusicPlayer.MODE_SEQUENTIAL: return getString(R.string.play_mode_sequential);
+            case MusicPlayer.MODE_SINGLE_LOOP: return getString(R.string.play_mode_single_loop);
+            case MusicPlayer.MODE_SHUFFLE: return getString(R.string.play_mode_shuffle);
+            case MusicPlayer.MODE_LIST_LOOP:
+            default: return getString(R.string.play_mode_list_loop);
+        }
+    }
+
+    /**
+     * 按当前模式刷新播放模式按钮。
+     *
+     * 图标随模式变化；同时把模式名写进 contentDescription ——
+     * 四个图标形状相近，读屏用户（以及长按查看提示的场景）需要文字。
+     */
+    private void refreshPlayModeButton(int mode) {
+        if (playModeButton == null) return;
+        int icon;
+        switch (mode) {
+            case MusicPlayer.MODE_SEQUENTIAL: icon = R.drawable.ic_sequential; break;
+            case MusicPlayer.MODE_SINGLE_LOOP: icon = R.drawable.ic_repeat_one; break;
+            case MusicPlayer.MODE_SHUFFLE: icon = R.drawable.ic_shuffle; break;
+            case MusicPlayer.MODE_LIST_LOOP:
+            default: icon = R.drawable.ic_repeat; break;
+        }
+        playModeButton.setImageResource(icon);
+        playModeButton.setContentDescription(
+                getString(R.string.btn_play_mode) + "：" + playModeLabel(mode));
+    }
     
     private void updatePlayerUI() {
         WebDAVFile currentTrack = musicPlayer.getCurrentTrack();
@@ -2057,6 +2099,11 @@ public class MainActivity extends AppCompatActivity implements
             // 更新播放列表按钮状态
             previousButton.setEnabled(musicPlayer.getPlaylist().size() > 1);
             nextButton.setEnabled(musicPlayer.getPlaylist().size() > 1);
+
+            // 播放模式按钮：始终可用（列表只有一首时，单曲循环仍然有意义），
+            // 图标按 MusicPlayer 里持久化的模式显示
+            playModeButton.setEnabled(true);
+            refreshPlayModeButton(musicPlayer.getPlayMode());
             
             // 显示播放器
             miniPlayerLayout.setVisibility(View.VISIBLE);
@@ -2100,6 +2147,11 @@ public class MainActivity extends AppCompatActivity implements
         });
     }
     
+    @Override
+    public void onPlayModeChanged(int mode) {
+        mainHandler.post(() -> refreshPlayModeButton(mode));
+    }
+
     @Override
     public void onProgress(int position, int duration) {
         mainHandler.post(() -> {

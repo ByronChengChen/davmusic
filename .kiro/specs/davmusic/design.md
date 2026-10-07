@@ -219,7 +219,8 @@ public class ServerProfile {
 | **本地播放** | 直接 `setDataSource(filePath)`，无网络请求（R6.3） |
 | 进度更新 | 定时回调当前位置（服务侧 1s 与通知同频，UI 侧 500ms） |
 | 播放列表 | 持有 `List<WebDAVFile>` 与当前索引，支持上一首/下一首 |
-| 状态回调 | `OnPlaybackListener`：`onTrackChanged` / `onPlayStateChanged` / `onProgress` / `onError` |
+| **播放模式** | 顺序播放 / 列表循环（默认）/ 单曲循环 / 随机播放；见下方「播放模式设计」（R5.11–R5.14） |
+| 状态回调 | `OnPlaybackListener`：`onTrackChanged` / `onPlayStateChanged` / `onProgress` / `onPlayModeChanged` / `onError` |
 | 错误抑制 | 切歌过程中抑制中间态误报错误（R5.10） |
 | 资源释放 | `release()` 停止轮询、释放 MediaPlayer、清空监听器 |
 
@@ -245,6 +246,43 @@ playFile(WebDAVFile file):
     else:
         → 播放 getDownloadUrl(file.href)，携带 Authorization 头
 ```
+
+**播放模式设计**（R5.11–R5.14）：
+
+| 模式 | 一首播完（自动接续） | 用户点「下一首」 |
+|------|---------------------|-----------------|
+| 顺序播放 | 列表下一首；**最后一首播完停止** | 列表下一首，末尾回到第一首 |
+| 列表循环（默认） | 列表下一首；最后一首回到第一首 | 同左 |
+| 单曲循环 | **重播当前曲目** | 列表下一首（主动切歌优先于模式） |
+| 随机播放 | 随机挑一首（≠ 当前） | 同左 |
+
+默认值取**列表循环**，与本功能实现前的既有行为（顺序播放 + 播完回到开头）一致。
+
+关键实现约束 —— 动这块之前务必读懂，每条都对应一个真实的错法：
+
+1. **决策逻辑只有一处**：`MusicPlayer.nextIndexOf(mode, pos, size, userInitiated)`
+   是纯静态函数，**预加载**与**播完切歌**都调它（`userInitiated` 区分两者）。
+   任何一处另写一份算法，都会出现"预加载的是 A、状态推进到 B"的错位 ——
+   随机模式下表现为界面显示的曲目与耳朵里听到的不是同一首。
+2. **单曲循环交给 `MediaPlayer.setLooping(true)`**，而不是靠 `onCompletion` 重播：
+   - native 层无缝重播，循环点**不需要重新取流**；
+   - 官方文档：当前 player 处于 looping 时，**已设置的 next player 不会被启动** ——
+     这给了第二层保险（即使预加载残留也不会打断循环）；
+   - 循环标记随实例走（新建/顶替都会复位），因此 `onPrepared` 里必须按当前模式重设。
+3. **切模式必须立即生效**，否则用户看到的是"选了单曲循环却还是换歌了"：
+   - 已挂载的下一首是按【旧模式】挑的 → 用 `setNextMediaPlayer(null)` 取消
+     （文档明确允许用 `null` 表示"播完不接下一首"），再按新模式重挂；
+   - **目标没变就不重挂** —— 重挂会重新拉一路流，而服务端对请求量敏感
+     （见 AGENTS.md 网络策略），所以先比 `preloadedPosition`/`preparingPosition`；
+   - 取消后**不当场 `release()`**：native 层的切换有可能刚刚开始，
+     当场释放会掐断刚开始播的那一首。改为记入 `pendingReleasePlayer`，
+     在下一个安全点（stop / 切歌 / 释放）回收。
+4. **预加载目标必须记下下标**（`preloadedPosition`）：播完时**不能**再用
+   `currentPosition + 1` 推进 —— 随机模式下 +1 会让状态与声音对不上，
+   且下一次切歌会从错的位置继续。
+5. **在途预加载靠代号作废**（`preloadGeneration`）：`prepareAsync()` 是异步的，
+   切模式时旧目标可能**正在 prepare**；没有代号，它会在新目标之后挂上去，
+   把已经算好的下一首换回旧模式的曲目。回调里代号对不上就丢弃自己。
 
 ### 2.5 RemoteLogger（诊断）
 
@@ -450,12 +488,24 @@ NetworkUtils 回调检测到由离线 → 在线
   → updateMediaSessionState() 每秒刷新 → 系统媒体控制中心进度条持续走动（R9.5）
 
 曲目播完
-  → MusicPlayer.onCompletion → 播放列表下一首
+  → 预加载已挂上（setNextMediaPlayer）：native 层无缝接续，回调里只同步状态，
+    索引推进到【预加载时记下的 preloadedPosition】（随机模式下不能 +1）
+  → 未预加载（首次播放 / 预加载失败 / 单曲循环 / 顺序播放到底）：
+    nextIndexOf(mode, pos, size, userInitiated=false) 决定下一首；返回 -1 则停止
   → 该行为在锁屏/后台（Activity 已销毁）下同样成立（R9.6）
+
+用户点击播放模式按钮
+  → MusicPlayer.cyclePlayMode() → setPlayMode()
+  → 1) desired = nextIndexOf(新模式, pos, size, false)
+     2) desired 与已有目标（preloadedPosition/preparingPosition）不同时：
+        setNextMediaPlayer(null) 取消旧目标 → 按新模式重挂预加载
+     3) 按模式设置 setLooping（单曲循环 = true）
+  → onPlayModeChanged → MainActivity 换图标；模式写入 SharedPreferences（R5.13）
+  → 单曲循环下当前曲目在 native 层无缝重播，循环点不产生新的取流请求（R5.12）
 
 用户从通知栏/锁屏/蓝牙耳机操作
   → MediaSessionCompat.Callback（onPlay / onPause / onSkipToNext / onSkipToPrevious）
-  → MusicPlayer 对应动作
+  → MusicPlayer 对应动作（主动切歌优先于播放模式，见 R5.14）
 ```
 
 ### 4.5 上传（对应 R7）
@@ -514,6 +564,7 @@ public interface OnPlaybackListener {
     void onTrackChanged(WebDAVFile track);
     void onPlayStateChanged(boolean isPlaying);
     void onProgress(int position, int duration);
+    void onPlayModeChanged(int mode);     // 见 MODE_* 常量（R5.11）
     void onError(String error);
 }
 ```
@@ -571,6 +622,7 @@ public interface OnPlaybackListener {
 | 大量文件时列表卡顿 | 目录含数百音频 | RecyclerView 复用 + 局部刷新（`updateDownloadState`）而非整表重绘 |
 | 离线索引与磁盘不一致 | 索引里有但文件已删 | `removeDownloadedFile()` 同步清理索引；`getCacheSize()`/`getOfflineFileCount()` 供核对 |
 | **CI 构建环境变更** | `sdkmanager` 移除 `tools` 包导致 SDK 安装失败 | 工作流已适配（不再安装 `tools`）；见 tasks.md 任务 10 |
+| **切模式撞上"曲目刚结束"的竞态** | 在 native 层已切换、而 `onCompletion` 尚未派发的极窄窗口内切模式：此时 `setNextMediaPlayer(null)` 已撤不回那次切换，被记为"待回收"的实例可能在下一个安全点被释放，表现为新曲目短暂中断后重新开始 | 窗口为毫秒级，且**状态最终一致**（不会错播曲目、不会崩）；单曲循环另有 `setLooping` 兜底。已列入真机验证项 |
 
 ---
 
@@ -654,11 +706,26 @@ public interface OnPlaybackListener {
 |------|------|
 | 播放源选择 | 已下载 → 本地路径；未下载 → 在线 URL |
 | 播放列表索引 | `setPlaylist(list, 3)` → 当前曲目为第 4 项 |
-| 下一首边界 | 最后一首时 `playNext()` → 行为符合设计（循环或停止） |
 | 上一首边界 | 第一首时 `playPrevious()` → 行为符合设计 |
 | 错误回调 | 设置无效数据源 → 触发 `onError` |
 | **切歌不误报** | 连续切歌过程 → 不产生误报 `onError`（R5.10） |
 | **单一线程** | 并发发起多个播放操作 → 状态不乱（R9.7） |
+
+`nextIndexOf()` 已抽成**纯静态函数**（不依赖 MediaPlayer / Context），
+因此播放模式这块可以直接用普通 JUnit 覆盖，不需要仪器测试：
+
+| 用例 | 说明 |
+|------|------|
+| 顺序播放 · 自动 · 中间位置 | `(SEQUENTIAL, 1, 5, false)` → 2 |
+| 顺序播放 · 自动 · 最后一首 | `(SEQUENTIAL, 4, 5, false)` → **-1**（停止，不回第一首） |
+| 顺序播放 · 手动 · 最后一首 | `(SEQUENTIAL, 4, 5, true)` → 0（手动切歌必须换歌） |
+| 列表循环 · 自动 · 最后一首 | `(LIST_LOOP, 4, 5, false)` → 0 |
+| 单曲循环 · 自动 | `(SINGLE_LOOP, 2, 5, false)` → **-1**（交给 `setLooping` 重播） |
+| 单曲循环 · 手动 | `(SINGLE_LOOP, 2, 5, true)` → 3（主动切歌优先于模式，R5.14） |
+| 随机 · 任意 | `(SHUFFLE, pos, 5, *)` → 结果 ≠ pos（列表 ≥2 首） |
+| 仅一首 · 自动 | `(any, 0, 1, false)` → -1（保持既有行为：播完停止） |
+| 仅一首 · 手动 | `(any, 0, 1, true)` → 0 |
+| 空列表 / 越界下标 | `size=0` → -1；`currentPos=-1` → 0 |
 
 **`NetworkUtilsTest`（需 Robolectric）**
 
@@ -675,6 +742,7 @@ public interface OnPlaybackListener {
 | 真实 WebDAV 服务器集成测试 | 需要稳定测试环境与凭据，改用 MockWebServer 后续补充 |
 | MediaPlayer 真实解码测试 | 依赖音频文件与设备能力，手工验证 |
 | **MediaSession / 通知栏交互** | 依赖系统媒体控制中心，真机手工验证 |
+| **播放模式切换的真实接续行为** | `nextIndexOf()` 是纯函数可直接单测，但 `setNextMediaPlayer(null)` 取消/重挂、`setLooping` 无缝重播都依赖真实 MediaPlayer，只能真机验证 |
 | **前台服务保活时长** | 依赖厂商 ROM 后台策略，真机长时验证 |
 | 性能测试 | 数据量小，暂不需要 |
 

@@ -48,6 +48,13 @@
     <string name="btn_pause">暂停</string>
     <string name="btn_previous">上一首</string>
     <string name="btn_next">下一首</string>
+
+    <!-- 播放模式（迷你播放器循环切换；顺序 → 列表循环 → 单曲循环 → 随机） -->
+    <string name="btn_play_mode">播放模式</string>
+    <string name="play_mode_sequential">顺序播放</string>
+    <string name="play_mode_list_loop">列表循环</string>
+    <string name="play_mode_single_loop">单曲循环</string>
+    <string name="play_mode_shuffle">随机播放</string>
     
     <!-- 对话框 -->
     <string name="title_confirm_delete">删除确认</string>
