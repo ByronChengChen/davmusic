@@ -500,10 +500,6 @@ public class WebDAVClient {
     private String encodeSegment(String seg) {
         if (seg == null || seg.isEmpty()) return "";
         try {
-            // 若该段本身已含 %XX 形态，认为已编码，直接返回
-            if (seg.matches(".*%[0-9A-Fa-f]{2}.*")) {
-                return seg;
-            }
             // 逐字节编码：只有 unreserved 字符原样保留，其余全部 %XX。
             // 不能用 URLEncoder.encode —— 它把空格编成 '+'，且无法区分字面 '+'，
             // 若再 replace("+", "%20") 会把刚生成的 %2B 也改坏。
@@ -891,17 +887,38 @@ public class WebDAVClient {
     }
 
     /**
-     * URI 路径解码。
-     * 注意：不能用 URLDecoder.decode —— 那是 form-urlencoded 语义，会把字面 '+' 变成空格。
-     * WebDAV 的 href 是标准 URI 路径编码，'+' 是合法字面字符，必须原样保留。
+     * 百分号解码（RFC 3986 路径语义）。
+     *
+     * 两条必须守住的规则：
+     * 1. 不能碰 '+'。WebDAV 的 href 是标准 URI 路径编码，'+' 是合法字面字符；
+     *    java.net.URLDecoder 是 form-urlencoded 语义，会把 '+' 解成空格，
+     *    导致 nobodyknows+-Hero's Come Back!!.m4a 之类查询 404。
+     * 2. 必须真的解出 %XX。曾用 new URI(null, null, s, null).getPath()，
+     *    但那个四参构造是「把 path 当**已解码**文本再编码」，getPath() 又解回来，
+     *    净效果是原样返回——中文目录于是显示成 %E5%8A%A8%E7%94%BB。
      */
     private String urlDecode(String s) {
-        try {
-            return new java.net.URI(null, null, "/" + s, null).getPath().substring(1);
-        } catch (Exception e) {
-            // 兜底：只处理 %XX，不碰 '+'（反斜杠会被 URI 当成非法的转义起点，原样返回）
-            return s;
+        if (s == null || s.indexOf('%') < 0) return s;
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream(s.length());
+        int i = 0;
+        while (i < s.length()) {
+            char c = s.charAt(i);
+            if (c == '%' && i + 2 < s.length()) {
+                int hi = Character.digit(s.charAt(i + 1), 16);
+                int lo = Character.digit(s.charAt(i + 2), 16);
+                if (hi >= 0 && lo >= 0) {
+                    out.write((hi << 4) | lo);
+                    i += 3;
+                    continue;
+                }
+            }
+            // 非法 %XX 或普通字符：按 UTF-8 原样写出（正确处理代理对）
+            int cp = s.codePointAt(i);
+            byte[] b = new String(Character.toChars(cp)).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            out.write(b, 0, b.length);
+            i += Character.charCount(cp);
         }
+        return new String(out.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
     }
 
     /** 去掉首尾斜杠 */
