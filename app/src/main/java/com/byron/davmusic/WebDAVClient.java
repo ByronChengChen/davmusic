@@ -524,6 +524,113 @@ public class WebDAVClient {
         }
     }
 
+    // 删除远端文件/文件夹
+    public void deleteRemote(String remotePath, boolean isCollection,
+                             final WebDAVCallback<Integer> callback) {
+        if (!isConfigured()) {
+            callback.onError(new Exception("WebDAV client not configured"));
+            return;
+        }
+        // 空路径会退化成对服务器根目录发 DELETE —— 必须挡住，
+        // 否则一次误调用就是把整台服务器的内容清空。
+        if (remotePath == null || trimSlashes(remotePath).isEmpty()) {
+            callback.onError(new Exception("拒绝删除服务器根目录"));
+            return;
+        }
+
+        String url = getDownloadUrl(remotePath);
+        if (isCollection && !url.endsWith("/")) {
+            url += "/";
+        }
+
+        Request request = new Request.Builder()
+                .url(url)
+                .delete()
+                .header("Authorization", getBasicAuthHeader())
+                .build();
+
+        client.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                callback.onError(e);
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                try {
+                    if (response.isSuccessful()) {
+                        // 防御：重定向可能让 DELETE 被改写成 GET，
+                        // 此时 2xx 并不能证明条目真的被删掉了，不能报成功
+                        if (!"DELETE".equals(response.request().method())) {
+                            callback.onError(new Exception(
+                                    "服务端重定向后未执行删除（" + response.request().method() + "）"));
+                            return;
+                        }
+                        callback.onSuccess(response.code());
+                    } else {
+                        callback.onError(new Exception("HTTP " + response.code()
+                                + ": " + response.message()));
+                    }
+                } finally {
+                    response.close();
+                }
+            }
+        });
+    }
+
+    // 新建远端文件夹
+    public void createFolder(String remotePath, final WebDAVCallback<Integer> callback) {
+        if (!isConfigured()) {
+            callback.onError(new Exception("WebDAV client not configured"));
+            return;
+        }
+        // 空路径会退化成对服务器根目录发 MKCOL —— 必须挡住，
+        // 根目录是既有事实，不是能"新建"的对象
+        if (remotePath == null || trimSlashes(remotePath).isEmpty()) {
+            callback.onError(new Exception("文件夹路径为空"));
+            return;
+        }
+
+        String url = getDownloadUrl(remotePath);
+        if (!url.endsWith("/")) {
+            url += "/";
+        }
+
+        Request request = new Request.Builder()
+                .url(url)
+                .method("MKCOL", RequestBody.create("", MediaType.parse("text/plain")))
+                .header("Authorization", getBasicAuthHeader())
+                .build();
+
+        client.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                callback.onError(e);
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) {
+                try {
+                    if (response.isSuccessful()) {
+                        // 与删除同一道防御：重定向会把非 GET/HEAD 请求改写，
+                        // 此时 2xx 并不能证明请求真的是 MKCOL、也证明不了建成了
+                        if (!"MKCOL".equals(response.request().method())) {
+                            callback.onError(new Exception(
+                                    "服务端重定向后未执行创建（" + response.request().method() + "）"));
+                            return;
+                        }
+                        callback.onSuccess(response.code());
+                    } else {
+                        callback.onError(new Exception("HTTP " + response.code()
+                                + ": " + response.message()));
+                    }
+                } finally {
+                    response.close();
+                }
+            }
+        });
+    }
+
     // 测试连接
     public void testConnection(final WebDAVCallback<Boolean> callback) {
         if (!isConfigured()) {
