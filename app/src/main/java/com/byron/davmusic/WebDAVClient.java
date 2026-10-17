@@ -253,7 +253,7 @@ public class WebDAVClient {
      *    因为云盘驱动偶尔会返回异常状态码但字节已写入（参见 423 现象）。
      *
      * @param localFile  本地源文件
-     * @param remotePath 相对路径（不含 baseUrl），如 "music/xxx.m4a"
+     * @param remotePath 相对路径（不含 baseUrl），如 "cmcc/music/xxx.m4a"
      * @param callback   进度与结果回调（主线程）
      */
     public void upload(File localFile, String remotePath, final ProgressCallback callback) {
@@ -315,152 +315,6 @@ public class WebDAVClient {
                     } else {
                         callback.onError(new Exception(
                                 "上传失败: HTTP " + code + "（远端 " + remote + " 字节）"));
-                    }
-                } finally {
-                    response.close();
-                }
-            }
-        });
-    }
-
-    // 删除远端文件或目录
-    /**
-     * 删除远端文件或目录（WebDAV DELETE）。
-     *
-     * 要点：
-     *  - 路径必须逐段编码：中文/空格目录名不编码时请求根本发不出去，
-     *    与下载、上传是同一个坑（统一走 getDownloadUrl）。
-     *  - 目录的删除由服务端递归完成（RFC 4918：对 collection 的 DELETE
-     *    会删掉整棵子树），客户端不需要自己遍历子项。
-     *  - 目录 URL 要带尾斜杠，与 PROPFIND 保持一致：不带时部分服务端会
-     *    301 到带斜杠的规范地址，而 OkHttp 会把 301/302 上的 DELETE
-     *    改写成 GET —— 结果就是「删除成功」是假的。
-     *  - 状态码原样交回调用方：401/403 是凭据或权限问题，404 是条目已经
-     *    不在了，429 是限流 —— 只回 true/false 用户分不清错在哪。
-     *  - 不做自动重试：与全局策略一致（见 MainActivity 中关于 429 的说明），
-     *    服务端的登录锁经不起客户端重试。
-     *
-     * @param remotePath   相对路径（不含 baseUrl），如 "music/xxx.m4a"
-     * @param isCollection 是否为目录（决定是否补尾斜杠）
-     * @param callback     成功时回传 HTTP 状态码（WebDAV 正常应答为 204）
-     */
-    public void deleteRemote(String remotePath, boolean isCollection,
-                             final WebDAVCallback<Integer> callback) {
-        if (!isConfigured()) {
-            callback.onError(new Exception("WebDAV client not configured"));
-            return;
-        }
-        // 空路径会退化成对服务器根目录发 DELETE —— 必须挡住，
-        // 否则一次误调用就是把整台服务器的内容清空。
-        if (remotePath == null || trimSlashes(remotePath).isEmpty()) {
-            callback.onError(new Exception("拒绝删除服务器根目录"));
-            return;
-        }
-
-        String url = getDownloadUrl(remotePath);
-        if (isCollection && !url.endsWith("/")) {
-            url += "/";
-        }
-
-        Request request = new Request.Builder()
-                .url(url)
-                .delete()
-                .header("Authorization", getBasicAuthHeader())
-                .build();
-
-        client.newCall(request).enqueue(new Callback() {
-            @Override
-            public void onFailure(Call call, IOException e) {
-                callback.onError(e);
-            }
-
-            @Override
-            public void onResponse(Call call, Response response) throws IOException {
-                try {
-                    if (response.isSuccessful()) {
-                        // 防御：重定向可能让 DELETE 被改写成 GET，
-                        // 此时 2xx 并不能证明条目真的被删掉了，不能报成功
-                        if (!"DELETE".equals(response.request().method())) {
-                            callback.onError(new Exception(
-                                    "服务端重定向后未执行删除（" + response.request().method() + "）"));
-                            return;
-                        }
-                        callback.onSuccess(response.code());
-                    } else {
-                        callback.onError(new Exception("HTTP " + response.code()
-                                + ": " + response.message()));
-                    }
-                } finally {
-                    response.close();
-                }
-            }
-        });
-    }
-
-    // 新建远端文件夹
-    /**
-     * 在远端新建一个文件夹（WebDAV MKCOL，RFC 4918 §9.3）。
-     *
-     * 要点：
-     *  - 路径处理与上传/删除完全一致（统一走 getDownloadUrl 逐段编码），
-     *    目录 URL 必须带尾斜杠，否则部分服务端会 301 到规范地址。
-     *  - 只建【一层】，不递归建父目录：父目录不存在时服务端回 409，
-     *    交给调用方提示，而不是替用户猜一条路径出来。
-     *  - 请求体为空（Content-Length: 0）。MKCOL 本就不需要 body，
-     *    带内容的请求会被部分服务端判为 415。
-     *  - 不做自动重试：与全局策略一致（见 MainActivity 中关于 429 的说明），
-     *    服务端的登录锁经不起客户端重试。
-     *  - 状态码原样交回调用方：401/403 是凭据或写入权限，405 是已存在
-     *    或该服务端不支持 MKCOL，409 是父目录不存在 —— 只回 true/false
-     *    用户分不清错在哪。
-     *
-     * @param remotePath 相对路径（不含 baseUrl），如 "music/新歌"
-     * @param callback   成功时回传 HTTP 状态码（WebDAV 正常应答为 201）
-     */
-    public void createFolder(String remotePath, final WebDAVCallback<Integer> callback) {
-        if (!isConfigured()) {
-            callback.onError(new Exception("WebDAV client not configured"));
-            return;
-        }
-        // 空路径会退化成对服务器根目录发 MKCOL —— 必须挡住，
-        // 根目录是既有事实，不是能"新建"的对象
-        if (remotePath == null || trimSlashes(remotePath).isEmpty()) {
-            callback.onError(new Exception("文件夹路径为空"));
-            return;
-        }
-
-        String url = getDownloadUrl(remotePath);
-        if (!url.endsWith("/")) {
-            url += "/";
-        }
-
-        Request request = new Request.Builder()
-                .url(url)
-                .method("MKCOL", RequestBody.create("", MediaType.parse("text/plain")))
-                .header("Authorization", getBasicAuthHeader())
-                .build();
-
-        client.newCall(request).enqueue(new Callback() {
-            @Override
-            public void onFailure(Call call, IOException e) {
-                callback.onError(e);
-            }
-
-            @Override
-            public void onResponse(Call call, Response response) {
-                try {
-                    if (response.isSuccessful()) {
-                        // 与删除同一道防御：重定向会把非 GET/HEAD 请求改写，
-                        // 此时 2xx 并不能证明请求真的是 MKCOL、也证明不了建成了
-                        if (!"MKCOL".equals(response.request().method())) {
-                            callback.onError(new Exception(
-                                    "服务端重定向后未执行创建（" + response.request().method() + "）"));
-                            return;
-                        }
-                        callback.onSuccess(response.code());
-                    } else {
-                        callback.onError(new Exception("HTTP " + response.code()
-                                + ": " + response.message()));
                     }
                 } finally {
                     response.close();
@@ -617,7 +471,7 @@ public class WebDAVClient {
 
     /**
      * 由相对路径构造完整 URL。
-     * 兼容传入以 "/" 开头、或误带 basePath 前缀（如 "dav/music/..."）的路径。
+     * 兼容传入以 "/" 开头、或误带 basePath 前缀（如 "dav/cmcc/..."）的路径。
      */
     public String getDownloadUrl(String remotePath) {
         String path = remotePath == null ? "" : remotePath;
@@ -650,8 +504,21 @@ public class WebDAVClient {
             if (seg.matches(".*%[0-9A-Fa-f]{2}.*")) {
                 return seg;
             }
-            return java.net.URLEncoder.encode(seg, "UTF-8")
-                    .replace("+", "%20");   // URLEncoder 把空格编成 +，路径中应为 %20
+            // 逐字节编码：只有 unreserved 字符原样保留，其余全部 %XX。
+            // 不能用 URLEncoder.encode —— 它把空格编成 '+'，且无法区分字面 '+'，
+            // 若再 replace("+", "%20") 会把刚生成的 %2B 也改坏。
+            StringBuilder sb = new StringBuilder();
+            for (byte b : seg.getBytes("UTF-8")) {
+                int c = b & 0xFF;
+                if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+                        || (c >= '0' && c <= '9')
+                        || c == '-' || c == '_' || c == '.' || c == '~') {
+                    sb.append((char) c);
+                } else {
+                    sb.append('%').append(String.format("%02X", c));
+                }
+            }
+            return sb.toString();
         } catch (Exception e) {
             return seg;
         }
@@ -746,16 +613,16 @@ public class WebDAVClient {
     // 解析 PROPFIND 响应
     //
     // 关于 href 的处理（关键，曾导致路径错乱、404、同名文件夹重复）：
-    //   - 服务器返回的 href 形如 "/dav/music/"，是【以 URL 的 path 部分为基准】
+    //   - 服务器返回的 href 形如 "/dav/cmcc/music/"，是【以 URL 的 path 部分为基准】
     //     的绝对路径，不含 scheme/host。因此不能用 baseUrl（含 https://host）去剥前缀。
     //   - 正确做法：取出 baseUrl 的 path（如 "/dav/"），剥离它，再按 "/" 逐段拆分。
     //   - href 中的中文等非 ASCII 字符是 URL 编码的（%E5%9B%BD%E8%AF%AD），
     //     必须 URL 解码后再作显示名与路径，否则会乱码、且拼接出的请求 URL 打不开。
     //   - PROPFIND Depth:1 的响应【首条通常是目录自身】，必须剔除，否则界面会
     //     出现与当前目录同名的文件夹。判断方式：与当前请求路径比较，而不是
-    //     判断相对路径是否为空（请求 /music/ 时自身的 relPath 恰为 "music"，非空）。
+    //     判断相对路径是否为空（请求 /cmcc/ 时自身的 relPath 恰为 "cmcc"，非空）。
     //
-    // @param requestedPath 本次请求的路径（如 "/music" 或 "/"），用于识别并剔除目录自身
+    // @param requestedPath 本次请求的路径（如 "/cmcc" 或 "/"），用于识别并剔除目录自身
     private List<WebDAVFile> parsePropfindResponse(String xml, String requestedPath) throws Exception {
         List<WebDAVFile> files = new ArrayList<>();
 
@@ -772,24 +639,13 @@ public class WebDAVClient {
 
         NodeList responses = doc.getElementsByTagNameNS("DAV:", "response");
 
-        // 空的 multistatus 是【畸形响应】，不是「空目录」。
-        // 合规的 WebDAV 服务器至少会返回目录自身那一条 <response>，
-        // 所以 0 条说明响应不完整（网关截断、协议不符等）。
-        // 这里主动抛异常，让它走 onError 分支 —— 否则空列表会被上层当成
-        // 「这个目录是空的」缓存下来，把真实内容遮住。
-        // 反过来说：能走到下面的空列表，就是「目录确实为空」的可信结论，
-        // 上层可以放心缓存（见 MainActivity 的空目录缓存处理）。
-        if (responses.getLength() == 0) {
-            throw new Exception("PROPFIND 响应缺少 <response> 元素，视为畸形响应");
-        }
-
         for (int i = 0; i < responses.getLength(); i++) {
             Element response = (Element) responses.item(i);
 
             String href = getElementText(response, "DAV:", "href");
             if (href == null || href.isEmpty()) continue;
 
-            // 1) 剥离 baseUrl 的 path 前缀，得到相对路径（如 "music/某歌手"）
+            // 1) 剥离 baseUrl 的 path 前缀，得到相对路径（如 "cmcc/music/苏慧伦"）
             String relPath = stripBasePath(href, basePath);
 
             // 2) URL 解码（处理中文、空格等）
@@ -866,15 +722,15 @@ public class WebDAVClient {
 
     /**
      * 把请求路径规范化为「相对 basePath 的路径」，用于与解析出的 relPath 比较。
-     * 例如 basePath="/dav/"，传入 "/music" → 返回 "music"；
-     * 传入 "/dav/music" → 也返回 "music"（容忍调用方误带 basePath 前缀）。
+     * 例如 basePath="/dav/"，传入 "/cmcc/music" → 返回 "cmcc/music"；
+     * 传入 "/dav/cmcc" → 也返回 "cmcc"（容忍调用方误带 basePath 前缀）。
      */
     private String normalizeRelPath(String path) {
         if (path == null) return "";
         String p = urlDecode(path.trim());
         p = trimSlashes(p);
 
-        // 若已带 basePath 前缀（如 "dav/music"），剥掉它
+        // 若已带 basePath 前缀（如 "dav/cmcc"），剥掉它
         String bp = trimSlashes(getBasePath());
         if (!bp.isEmpty() && p.equals(bp)) return "";
         if (!bp.isEmpty() && p.startsWith(bp + "/")) {
@@ -896,7 +752,7 @@ public class WebDAVClient {
 
     /**
      * 从 href 中剥离 baseUrl 的 path 前缀。
-     * href 可能形如 "/dav/music/" 或 "https://host/dav/music/"（部分服务器返回完整 URL），
+     * href 可能形如 "/dav/cmcc/" 或 "https://host/dav/cmcc/"（部分服务器返回完整 URL），
      * 两种都要兼容。
      */
     private String stripBasePath(String href, String basePath) {
@@ -927,11 +783,16 @@ public class WebDAVClient {
         return h.startsWith("/") ? h.substring(1) : h;
     }
 
-    /** URL 解码，失败则原样返回 */
+    /**
+     * URI 路径解码。
+     * 注意：不能用 URLDecoder.decode —— 那是 form-urlencoded 语义，会把字面 '+' 变成空格。
+     * WebDAV 的 href 是标准 URI 路径编码，'+' 是合法字面字符，必须原样保留。
+     */
     private String urlDecode(String s) {
         try {
-            return java.net.URLDecoder.decode(s, "UTF-8");
+            return new java.net.URI(null, null, "/" + s, null).getPath().substring(1);
         } catch (Exception e) {
+            // 兜底：只处理 %XX，不碰 '+'（反斜杠会被 URI 当成非法的转义起点，原样返回）
             return s;
         }
     }
