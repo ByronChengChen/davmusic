@@ -2,25 +2,16 @@ package com.byron.davmusic;
 
 import android.content.Context;
 import android.util.Base64;
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
-import org.xml.sax.InputSource;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.StringReader;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
 
 import okhttp3.Call;
 import okhttp3.Callback;
@@ -333,7 +324,7 @@ public class WebDAVClient {
     private long remoteSizeQuiet(String remotePath) {
         try {
             java.util.List<WebDAVFile> files = listFolderSync(parentOf(remotePath));
-            String name = lastSegment(remotePath);
+            String name = WebDAVResponseParser.lastSegment(remotePath);
             for (WebDAVFile f : files) {
                 if (name.equals(f.getDisplayName())) {
                     return f.getContentLength();
@@ -345,7 +336,7 @@ public class WebDAVClient {
     }
 
     private String parentOf(String path) {
-        String p = trimSlashes(path);
+        String p = WebDAVResponseParser.trimSlashes(path);
         int i = p.lastIndexOf('/');
         return i > 0 ? "/" + p.substring(0, i) : "/";
     }
@@ -463,8 +454,8 @@ public class WebDAVClient {
             // 兜底：从 href 中剥离 basePath
             String href = (file != null) ? file.getHref() : null;
             if (href == null) return baseUrl;
-            rel = trimSlashes(stripBasePath(href, getBasePath()));
-            rel = urlDecode(rel);
+            rel = WebDAVResponseParser.trimSlashes(WebDAVResponseParser.stripBasePath(href, getBasePath()));
+            rel = WebDAVResponseParser.urlDecode(rel);
         }
         return getDownloadUrl(rel);
     }
@@ -481,7 +472,7 @@ public class WebDAVClient {
 
         // 去掉可能误带的 basePath 前缀（防止出现 /dav/dav/... 这样的重复）
         String basePath = getBasePath();
-        String bp = trimSlashes(basePath);
+        String bp = WebDAVResponseParser.trimSlashes(basePath);
         if (!bp.isEmpty() && path.startsWith(bp + "/")) {
             path = path.substring(bp.length() + 1);
         }
@@ -529,7 +520,7 @@ public class WebDAVClient {
         }
         // 空路径会退化成对服务器根目录发 DELETE —— 必须挡住，
         // 否则一次误调用就是把整台服务器的内容清空。
-        if (remotePath == null || trimSlashes(remotePath).isEmpty()) {
+        if (remotePath == null || WebDAVResponseParser.trimSlashes(remotePath).isEmpty()) {
             callback.onError(new Exception("拒绝删除服务器根目录"));
             return;
         }
@@ -582,7 +573,7 @@ public class WebDAVClient {
         }
         // 空路径会退化成对服务器根目录发 MKCOL —— 必须挡住，
         // 根目录是既有事实，不是能"新建"的对象
-        if (remotePath == null || trimSlashes(remotePath).isEmpty()) {
+        if (remotePath == null || WebDAVResponseParser.trimSlashes(remotePath).isEmpty()) {
             callback.onError(new Exception("文件夹路径为空"));
             return;
         }
@@ -727,249 +718,15 @@ public class WebDAVClient {
     //
     // @param requestedPath 本次请求的路径（如 "/cmcc" 或 "/"），用于识别并剔除目录自身
     private List<WebDAVFile> parsePropfindResponse(String xml, String requestedPath) throws Exception {
-        List<WebDAVFile> files = new ArrayList<>();
-
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        factory.setNamespaceAware(true);
-        DocumentBuilder builder = factory.newDocumentBuilder();
-        Document doc = builder.parse(new InputSource(new StringReader(xml)));
-
-        // 计算 baseUrl 的 path 部分，用于从 href 中剥离前缀
-        String basePath = getBasePath();
-
-        // 当前请求目录的规范化相对路径（用于剔除"目录自身"那一条）
-        String selfRel = normalizeRelPath(requestedPath);
-
-        NodeList responses = doc.getElementsByTagNameNS("DAV:", "response");
-
-        for (int i = 0; i < responses.getLength(); i++) {
-            Element response = (Element) responses.item(i);
-
-            String href = getElementText(response, "DAV:", "href");
-            if (href == null || href.isEmpty()) continue;
-
-            // 1) 剥离 baseUrl 的 path 前缀，得到相对路径（如 "cmcc/music/苏慧伦"）
-            String relPath = stripBasePath(href, basePath);
-
-            // 2) URL 解码（处理中文、空格等）
-            relPath = urlDecode(relPath);
-
-            // 3) 规范化：去首尾斜杠
-            relPath = trimSlashes(relPath);
-
-            // 4) 剔除目录自身（与当前请求路径一致的那一条）
-            if (relPath.equals(selfRel)) continue;
-
-            // 5) 跳过系统元数据文件
-            if (isSystemFile(relPath)) continue;
-
-            WebDAVFile file = new WebDAVFile();
-            file.setHref(href);
-            // 显示名 = 相对路径的最后一段
-            file.setDisplayName(lastSegment(relPath));
-            // 保存规范化后的相对路径，供快照与后续拼接使用
-            file.setRelativePath(relPath);
-            // 打上服务器归属：条目自带来源，后续取流/缓存/播放队列都靠它
-            file.setOwner(server);
-
-            // 获取属性
-            Element propstat = getChildElement(response, "DAV:", "propstat");
-            if (propstat != null) {
-                Element prop = getChildElement(propstat, "DAV:", "prop");
-                if (prop != null) {
-                    String contentLength = getElementText(prop, "DAV:", "getcontentlength");
-                    if (contentLength != null && !contentLength.isEmpty()) {
-                        try {
-                            file.setContentLength(Long.parseLong(contentLength.trim()));
-                        } catch (NumberFormatException ignored) {
-                        }
-                    }
-
-                    String lastModified = getElementText(prop, "DAV:", "getlastmodified");
-                    if (lastModified != null) {
-                        // 【关键】必须用服务器返回的真实时间。
-                        // 旧实现读了这一段文本却把它丢掉，直接
-                        // setLastModified(System.currentTimeMillis())，
-                        // 于是「文件时间」变成了「这次列目录的时刻」：
-                        // 每刷新一次全目录的时间都变，任何按时间排序都会
-                        // 在两次刷新之间自己乱跳。详见 HttpDateParser。
-                        file.setLastModified(HttpDateParser.parse(lastModified));
-                    }
-
-                    String contentType = getElementText(prop, "DAV:", "getcontenttype");
-                    if (contentType != null) {
-                        file.setContentType(contentType.trim());
-                    }
-
-                    String etag = getElementText(prop, "DAV:", "getetag");
-                    if (etag != null) {
-                        file.setEtag(etag);
-                    }
-
-                    // 是否为文件夹：
-                    // 优先看 resourcetype 是否包含 collection 子元素；
-                    // 其次看 href 是否以 "/" 结尾（WebDAV 惯例）；
-                    // 最后才退回 contentLength == 0 的启发式判断。
-                    boolean isCollection = false;
-                    Element resType = getChildElement(prop, "DAV:", "resourcetype");
-                    if (resType != null) {
-                        NodeList collection = resType.getElementsByTagNameNS("DAV:", "collection");
-                        isCollection = collection.getLength() > 0;
-                    }
-                    if (!isCollection && href.endsWith("/")) {
-                        isCollection = true;
-                    }
-                    file.setCollection(isCollection);
-                }
-            }
-
-            files.add(file);
-        }
-
-        return files;
-    }
-
-    /**
-     * 把请求路径规范化为「相对 basePath 的路径」，用于与解析出的 relPath 比较。
-     * 例如 basePath="/dav/"，传入 "/cmcc/music" → 返回 "cmcc/music"；
-     * 传入 "/dav/cmcc" → 也返回 "cmcc"（容忍调用方误带 basePath 前缀）。
-     */
-    private String normalizeRelPath(String path) {
-        if (path == null) return "";
-        String p = urlDecode(path.trim());
-        p = trimSlashes(p);
-
-        // 若已带 basePath 前缀（如 "dav/cmcc"），剥掉它
-        String bp = trimSlashes(getBasePath());
-        if (!bp.isEmpty() && p.equals(bp)) return "";
-        if (!bp.isEmpty() && p.startsWith(bp + "/")) {
-            p = p.substring(bp.length() + 1);
-        }
-        return trimSlashes(p);
+        // 解析逻辑已抽到 WebDAVResponseParser（纯 JVM 可测），这里只负责注入
+        // 当前服务器的 basePath 与归属信息。设计与踩坑说明见该类的注释。
+        return WebDAVResponseParser.parse(xml, requestedPath, getBasePath(), server);
     }
 
     /** 取出 baseUrl 的 path 部分，如 https://host/dav/ -> "/dav/" */
     private String getBasePath() {
-        try {
-            java.net.URL u = new java.net.URL(baseUrl);
-            String p = u.getPath();
-            return (p == null || p.isEmpty()) ? "/" : p;
-        } catch (Exception e) {
-            return "/";
-        }
+        return WebDAVResponseParser.getBasePath(baseUrl);
     }
-
-    /**
-     * 从 href 中剥离 baseUrl 的 path 前缀。
-     * href 可能形如 "/dav/cmcc/" 或 "https://host/dav/cmcc/"（部分服务器返回完整 URL），
-     * 两种都要兼容。
-     */
-    private String stripBasePath(String href, String basePath) {
-        String h = href;
-
-        // 若 href 是完整 URL，先取出其 path
-        if (h.startsWith("http://") || h.startsWith("https://")) {
-            try {
-                h = new java.net.URL(h).getPath();
-            } catch (Exception ignored) {
-            }
-        }
-
-        // basePath 形如 "/dav/"；容忍不带尾斜杠的情况
-        String prefix = basePath.endsWith("/") ? basePath : basePath + "/";
-        String prefixNoSlash = prefix.substring(0, prefix.length() - 1);
-
-        if (h.equals(prefixNoSlash) || h.equals(prefixNoSlash + "/")) {
-            return "";
-        }
-        if (h.startsWith(prefix)) {
-            return h.substring(prefix.length());
-        }
-        if (h.startsWith(prefixNoSlash + "/")) {
-            return h.substring(prefixNoSlash.length() + 1);
-        }
-        // 前缀不匹配（服务器配置差异）：退化为去掉首个 "/"
-        return h.startsWith("/") ? h.substring(1) : h;
-    }
-
-    /**
-     * 百分号解码（RFC 3986 路径语义）。
-     *
-     * 两条必须守住的规则：
-     * 1. 不能碰 '+'。WebDAV 的 href 是标准 URI 路径编码，'+' 是合法字面字符；
-     *    java.net.URLDecoder 是 form-urlencoded 语义，会把 '+' 解成空格，
-     *    导致 nobodyknows+-Hero's Come Back!!.m4a 之类查询 404。
-     * 2. 必须真的解出 %XX。曾用 new URI(null, null, s, null).getPath()，
-     *    但那个四参构造是「把 path 当**已解码**文本再编码」，getPath() 又解回来，
-     *    净效果是原样返回——中文目录于是显示成 %E5%8A%A8%E7%94%BB。
-     */
-    private String urlDecode(String s) {
-        if (s == null || s.indexOf('%') < 0) return s;
-        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream(s.length());
-        int i = 0;
-        while (i < s.length()) {
-            char c = s.charAt(i);
-            if (c == '%' && i + 2 < s.length()) {
-                int hi = Character.digit(s.charAt(i + 1), 16);
-                int lo = Character.digit(s.charAt(i + 2), 16);
-                if (hi >= 0 && lo >= 0) {
-                    out.write((hi << 4) | lo);
-                    i += 3;
-                    continue;
-                }
-            }
-            // 非法 %XX 或普通字符：按 UTF-8 原样写出（正确处理代理对）
-            int cp = s.codePointAt(i);
-            byte[] b = new String(Character.toChars(cp)).getBytes(java.nio.charset.StandardCharsets.UTF_8);
-            out.write(b, 0, b.length);
-            i += Character.charCount(cp);
-        }
-        return new String(out.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
-    }
-
-    /** 去掉首尾斜杠 */
-    private String trimSlashes(String s) {
-        String r = s;
-        while (r.startsWith("/")) r = r.substring(1);
-        while (r.endsWith("/")) r = r.substring(0, r.length() - 1);
-        return r;
-    }
-
-    /** 取路径最后一段作为显示名 */
-    private String lastSegment(String path) {
-        int idx = path.lastIndexOf('/');
-        return idx >= 0 ? path.substring(idx + 1) : path;
-    }
-
-    /** 过滤系统元数据文件（macOS / Windows 产物） */
-    private boolean isSystemFile(String name) {
-        String n = lastSegment(name);
-        return n.startsWith("._")
-                || n.equals(".DS_Store")
-                || n.equals("Thumbs.db")
-                || n.equals("desktop.ini")
-                || n.equals("Desktop.ini");
-    }
-
-    private String getElementText(Element parent, String namespace, String localName) {
-        NodeList nodes = parent.getElementsByTagNameNS(namespace, localName);
-        if (nodes.getLength() > 0) {
-            Element element = (Element) nodes.item(0);
-            if (element != null) {
-                return element.getTextContent();
-            }
-        }
-        return null;
-    }
-
-    private Element getChildElement(Element parent, String namespace, String localName) {
-        NodeList nodes = parent.getElementsByTagNameNS(namespace, localName);
-        if (nodes.getLength() > 0) {
-            return (Element) nodes.item(0);
-        }
-        return null;
-    }
-
 
     private String getBasicAuthHeader() {
         String credentials = username + ":" + password;

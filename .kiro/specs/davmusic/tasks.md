@@ -15,7 +15,7 @@
 > 新增任务 12–21 覆盖 v1.18 → v1.30 的实际迭代（多服务器、前台服务、离线索引等）；
 > 任务 22 覆盖 v1.39 播放模式；**任务 23–25 覆盖 v1.32 → v1.38 的写操作与上报鉴权**（2026-10-09 补记）；
 > 任务 26 覆盖 v1.42 排序方式与真实时间解析。
-> 本清单已与代码 **v1.42（17 个类 / 9680 行）** 对齐。
+> 本清单已与代码 **v1.43（18 个类 / 9730 行）** 对齐。
 
 ---
 
@@ -52,7 +52,8 @@
 
 > **说明**：任务 1–9 由 Kiro 执行 agent 一次完成（9 个 Java 文件 / 2783 行）。
 > 任务 12–21 是后续在真机验证中迭代出来的实际工作，原 spec 未记录，本次补入。
-> 任务 11（单元测试）仍未开始，是当前唯一的未完成项。
+> 任务 11（单元测试）已部分完成：v1.43 接入 CI，62 个用例覆盖纯逻辑与
+> Context 相关类；`MusicPlayerTest` / `NetworkUtilsTest` 仍待补。
 
 ---
 
@@ -283,27 +284,35 @@
 
 ---
 
-## 任务 11 — 单元测试补充 `[ ]`
+## 任务 11 — 单元测试补充 `[~]` 部分完成（v1.43）
 
 **目标**：按 `design.md` §8 实现测试用例
 
-**实现**
-- [ ] `FileUtilsTest`：10 个用例（扩展名判定、格式化）
-- [ ] `WebDAVResponseParserTest`：8 个用例（XML 解析）
-- [ ] `ServerProfileTest` / `ServerStoreTest`：8 个用例（JSON 往返、scopeId、活动服务器回退）
-- [ ] `LocalCacheManagerTest`：9 个用例（快照、下载记录、作用域隔离、目录树重建）
-- [ ] `MusicPlayerTest`：7 个用例（播放源选择、列表边界、切歌不误报）
-- [ ] `NetworkUtilsTest`：2 个用例（网络检测）
-- [ ] 建议重构：把 `WebDAVClient` 的 XML 解析抽成独立的 `parseResponse(String)` 方法以便测试
+**实现（已完成）**
+- [x] `HttpDateParserTest`：10 个用例（RFC 1123 / RFC 850 / asctime / ISO 变体 → 同一时刻；
+      1970、尾部垃圾、纯日期 → 未知）
+- [x] `TrackSorterTest`：11 个用例（自然序、补零同值由后续文本决定、时间降序、
+      文件夹置顶、未知时间沉底、同名同时间按路径/服务器定序、null 元素）
+- [x] `FileUtilsTest`：9 个用例（扩展名判定、大小/时长格式化、路径操作）
+- [x] `WebDAVResponseParserTest`：13 个用例（中文解码、`+` 不被当空格、目录自身剔除、
+      文件夹判定、属性解析、**时间来自服务器而非 now**、系统文件过滤、完整 URL href）
+- [x] `LocalCacheManagerTest`：7 个用例（快照往返保真、空目录、覆盖写、删除、
+      损坏 JSON 降级、目录间隔离）—— Robolectric
+- [x] `ServerStoreTest`：12 个用例（首台自动活动、活动指针回退、别名唯一性、
+      JSON 往返、scopeId、旧版单服务器配置迁移）—— Robolectric
+- [x] 重构：XML 解析已抽成独立的 `WebDAVResponseParser`（纯 JVM，不依赖 OkHttp/Context）
 
-**前置条件**：`design.md` §8.4 建议引入 Robolectric 与 MockWebServer
+**仍未完成**
+- [ ] `MusicPlayerTest`：7 个用例（播放源选择、列表边界、切歌不误报）。
+      需要 ShadowMediaPlayer 与音频焦点模拟，风险高于收益，留待后续
+- [ ] `NetworkUtilsTest`：2 个用例（网络检测）。需要 ConnectivityManager shadow
 
-**产出**：`app/src/test/java/com/byron/davmusic/*Test.java`
+**前置条件**：已引入 `org.robolectric:robolectric:4.13` 与
+`testOptions.unitTests.includeAndroidResources`；MockWebServer 未引入（当前用例不触网）
 
-**演示**：`./gradlew test` 全部通过
+**产出**：`app/src/test/java/com/byron/davmusic/*Test.java`（6 个类 / 62 个用例）
 
-**状态说明**：这是**当前唯一未完成的任务**。项目迄今依靠"云端构建 + 真机验证"闭环保证质量，
-但缺少回归测试意味着每次改动都可能引入旧问题的回潮（v1.20–v1.27 的多个修复即属此类）。
+**演示**：CI 步骤 `./gradlew testDebugUnitTest` 全部通过；红了不出 APK
 
 ---
 
@@ -695,7 +704,7 @@ requirements 曾把「播放模式」列在范围外。这次是补做，不是�
 |------|------|
 | 脚手架与核心功能（1–9） | 全部完成 |
 | CI 与产物（10） | 完成（可出包，真机可装） |
-| 单元测试（11） | **未开始 —— 唯一缺口**（任务 22 的 `nextIndexOf()` 已具备纯函数条件，可优先补） |
+| 单元测试（11） | **部分完成**：6 个测试类 / 62 个用例已接入 CI（纯 JVM + Robolectric，无模拟器）；`MusicPlayerTest`、`NetworkUtilsTest` 待补 |
 | 真机迭代增强（12–26） | 全部完成 |
 
-**代码规模**：17 个类 / 9680 行（v1.42；v1.39 为 15 个类 / 9247 行；初版为 9 个类 / 2783 行）
+**代码规模**：18 个类 / 9730 行（v1.43；v1.42 为 17 个类 / 9680 行；v1.39 为 15 个类 / 9247 行；初版为 9 个类 / 2783 行）

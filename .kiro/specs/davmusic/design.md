@@ -14,6 +14,8 @@
 > - 初版：简化三层 + 单服务器，9 个类 / 2783 行
 > - 本次修订（对应代码 v1.30）：新增**多服务器与会话隔离**、**根层级（服务器列表）**、
 >   **前台服务与 MediaSession**、**本地离线索引**、**定位当前歌曲**，共 15 个类 / 7634 行
+> - v1.43：XML 解析抽成 `WebDAVResponseParser`（纯 JVM 可测），单元测试接入 CI（JUnit + Robolectric，
+>   无模拟器），共 18 个类 / 9730 行
 
 ---
 
@@ -393,6 +395,7 @@ signature = hex(HMAC-SHA256(key = 令牌, msg = canonical))
 | 类 | 职责 |
 |----|------|
 | `FileUtils` | 扩展名判定（`isAudioFile` / `isImageFile` / `isLyricsFile`）、大小与时长格式化、路径操作 |
+| `WebDAVResponseParser` | PROPFIND 响应解析（href 剥前缀 / URL 解码 / 剔除目录自身 / 属性与类型判定）；纯静态，不依赖 OkHttp 与 Context，由 `WebDAVClient` 委托调用 |
 | `NetworkUtils` | 网络连通性检测、网络类型判定、`getNetworkStatusString` 供 UI 显示在线/离线（R6.4） |
 
 **音频扩展名白名单**（R3.1）：
@@ -738,7 +741,7 @@ public interface OnPlaybackListener {
 |---------|---------|
 | `FileUtils` 的扩展名判定 | 纯函数，输入字符串 → 断言布尔值，无需 Android 环境 |
 | `FileUtils` 的大小/时长格式化 | 纯函数，覆盖边界值（0、负数、超大值） |
-| `WebDAVClient` 的 XML 解析 | 抽取 `parseResponse(String xml)`，用样例 XML 断言结果 |
+| `WebDAVClient` 的 XML 解析 | 已抽成 `WebDAVResponseParser`，用样例 XML 断言结果（纯 JVM） |
 | `ServerProfile` 的 JSON 往返 / `getScopeId` | 纯函数，构造对象 → 序列化 → 反序列化 → 断言字段一致 |
 | `ServerStore.pickActive` 的回退逻辑 | 纯函数（列表 + activeId → 期望 profile），覆盖 id 失效场景 |
 | `LocalCacheManager` 的 JSON 序列化 | 构造 `List<WebDAVFile>` → 序列化 → 反序列化 → 断言字段一致 |
@@ -747,7 +750,7 @@ public interface OnPlaybackListener {
 
 ### 8.2 测试用例清单
 
-**`FileUtilsTest`（JUnit，本地测试）**
+**`FileUtilsTest`（JUnit，纯 JVM —— 已实现，9 个用例）**
 
 | 用例 | 输入 | 期望 |
 |------|------|------|
@@ -762,7 +765,7 @@ public interface OnPlaybackListener {
 | 提取扩展名 | `"a.b.mp3"` | `"mp3"` |
 | 去扩展名 | `"01 黄色月亮.m4a"` | `"01 黄色月亮"` |
 
-**`WebDAVResponseParserTest`（JUnit，本地测试）**
+**`WebDAVResponseParserTest`（JUnit，纯 JVM —— 已实现，13 个用例）**
 
 | 用例 | 说明 |
 |------|------|
@@ -775,7 +778,7 @@ public interface OnPlaybackListener {
 | 空目录 | 仅含自身条目 → 返回空列表 |
 | 命名空间变体 | 服务器用 `d:` 小写前缀 → 仍能正确解析 |
 
-**`ServerProfileTest` / `ServerStoreTest`（JUnit，本地测试）**
+**`ServerProfileTest` / `ServerStoreTest`（JUnit；JSON 与 scopeId 为纯 JVM，清单持久化用 Robolectric —— 已实现，12 个用例）**
 
 | 用例 | 说明 |
 |------|------|
@@ -788,21 +791,22 @@ public interface OnPlaybackListener {
 | 空列表 | 无服务器 → `getActive()` 返回 null |
 | 别名重复检测 | 与其它服务器同名 → `isAliasTaken` 返回 true |
 
-**`LocalCacheManagerTest`（需 Robolectric 或仪器测试）**
+**`LocalCacheManagerTest`（Robolectric —— 已实现，7 个用例）**
 
 | 用例 | 说明 |
 |------|------|
 | 快照存取往返 | `saveSnapshot` → `loadSnapshot` 字段一致 |
-| 快照不含本地状态 | 序列化结果中不含 `downloadState` / `localPath` |
+| 快照字段保真 | 序列化**包含** `downloadState` / `localPath`（v1.29 起为恢复后的状态一致而保留）；仓库实现与旧设计不同，以本条为准 |
 | 下载标记持久化 | `markFileDownloaded` 后 `isDownloaded` 返回 true |
 | 删除后状态清除 | `removeDownloadedFile` 后 `isDownloaded` 返回 false |
 | 删除后索引同步 | `removeDownloadedFile` 后离线索引中不再含该条目 |
 | 不存在路径查询 | `getLocalFile("不存在")` 返回 null |
 | 快照覆盖更新 | 重复 `saveSnapshot` 同路径 → 内容被覆盖而非追加 |
-| **作用域隔离** | 相同路径在不同 scopeId 下 → 快照与下载记录互不可见 |
+| **目录间隔离** | 不同 folderPath 的快照互不影响；删除一个不影响另一个 |
+| **损坏 JSON 降级** | 半截 JSON → `loadSnapshot` 返回 null，不崩溃 |
 | **目录树重建** | 索引含 `/a/b/c.mp3` → `listLocalTree("/a/b")` 能列出 `c.mp3` |
 
-**`MusicPlayerTest`（需仪器测试，或抽出决策逻辑做纯函数测试）**
+**`MusicPlayerTest`（未实现；`nextIndexOf()` 可纯 JVM 测，其余需 ShadowMediaPlayer）**
 
 | 用例 | 说明 |
 |------|------|
@@ -829,7 +833,7 @@ public interface OnPlaybackListener {
 | 仅一首 · 手动 | `(any, 0, 1, true)` → 0 |
 | 空列表 / 越界下标 | `size=0` → -1；`currentPos=-1` → 0 |
 
-**`NetworkUtilsTest`（需 Robolectric）**
+**`NetworkUtilsTest`（未实现，需 Robolectric）**
 
 | 用例 | 说明 |
 |------|------|
@@ -848,14 +852,30 @@ public interface OnPlaybackListener {
 | **前台服务保活时长** | 依赖厂商 ROM 后台策略，真机长时验证 |
 | 性能测试 | 数据量小，暂不需要 |
 
-### 8.4 建议的测试依赖
+### 8.4 测试依赖（v1.43 已落地）
 
 ```gradle
 testImplementation 'junit:junit:4.13.2'
-testImplementation 'org.robolectric:robolectric:4.11.1'   // 需要 Context 的场景
-testImplementation 'com.squareup.okhttp3:mockwebserver:4.12.0'  // 后续补网络层测试
+testImplementation 'org.robolectric:robolectric:4.13'          // 需要 Context 的场景
+// testImplementation 'com.squareup.okhttp3:mockwebserver:4.12.0'  // 后续补网络层测试
 androidTestImplementation 'androidx.test.ext:junit:1.1.5'
 androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
 ```
 
-> 当前 `app/build.gradle` 已含 JUnit 与 Espresso；Robolectric 与 MockWebServer 为建议新增项。
+`app/build.gradle` 另需：
+
+```gradle
+testOptions {
+    unitTests {
+        includeAndroidResources = true   // Robolectric 读取资源
+        returnDefaultValues = true       // 未被 shadow 的 android.* 返回默认值
+    }
+}
+```
+
+> **在哪里跑**：GitHub Actions 的 `./gradlew testDebugUnitTest`（见 `.github/workflows/build.yml`），
+> 在 `assembleDebug` 之前执行 —— 测试红了就不产出 APK。**不需要模拟器**：纯 JVM 测试直接跑在
+> runner 的 JVM 上，Robolectric 在同一 JVM 内加载 Android 框架影子实现，只有 `androidTest`
+> 仪器测试才需要设备/AVD，本项目不采用。测试报告作为 `unit-test-report` artifact 上传。
+>
+> MockWebServer 未引入；当前用例不触网（`WebDAVResponseParser` 接受 XML 字符串，不需要 HTTP）。

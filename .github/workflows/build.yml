@@ -33,6 +33,18 @@ jobs:
     - name: Make gradlew executable
       run: chmod +x ./gradlew
 
+    # 单元测试跑在 GitHub runner 的 JVM 上：纯 JUnit + Robolectric，无模拟器。
+    # 放在 assembleDebug 之前 —— 测试红了就不必再产出 APK。
+    - name: Run unit tests
+      run: ./gradlew testDebugUnitTest --no-daemon --stacktrace
+
+    - name: Upload unit test report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: unit-test-report
+        path: app/build/reports/tests/testDebugUnitTest
+
     # 用仓库内的固定 keystore 签名。
     # 默认 debug keystore 由各 runner 临时生成，导致每次构建签名不同、
     # 无法覆盖安装（Conflicting app signatures）。

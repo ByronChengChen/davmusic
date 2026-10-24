@@ -10,8 +10,8 @@ android {
         applicationId "com.byron.davmusic"
         minSdk 26
         targetSdk 34
-        versionCode 142
-        versionName "1.42"
+        versionCode 143
+        versionName "1.43"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
@@ -71,6 +71,18 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+
+    // 单元测试跑在 JVM 上，不需要模拟器 / 真机：
+    //   · 纯 JVM（JUnit）：TrackSorter / HttpDateParser / FileUtils / WebDAVResponseParser
+    //   · Robolectric：需要 Context、SharedPreferences 的类（LocalCacheManager / ServerStore）
+    // includeAndroidResources 让 Robolectric 能读到资源；returnDefaultValues 让未
+    // 被 shadow 的 android.* 方法（如 android.util.Log）返回默认值而不是抛异常。
+    testOptions {
+        unitTests {
+            includeAndroidResources = true
+            returnDefaultValues = true
+        }
+    }
 }
 
 dependencies {
@@ -95,6 +107,11 @@ dependencies {
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 
     testImplementation 'junit:junit:4.13.2'
+
+    // Robolectric：在 JVM 上运行 Android 框架（Context / SharedPreferences / 资源），
+    // 因此带 Context 的单元测试也不需要模拟器。版本与 compileSdk 34 匹配。
+    testImplementation 'org.robolectric:robolectric:4.13'
+
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
 }
