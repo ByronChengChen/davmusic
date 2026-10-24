@@ -207,6 +207,56 @@ public class WebDAVClient {
         });
     }
 
+    /**
+     * 上传一小段字节（歌词等），不覆盖服务器上已有的同名文件。
+     *
+     * `If-None-Match: *` 是条件写：文件已存在时服务器返回 412，避免把用户
+     * 原有的歌词静默替换掉。部分 WebDAV 驱动忽略该头，此时调用方拿到的仍是
+     * 2xx —— 因此这只在「我们刚确认过 404」的场景下使用。
+     */
+    public void putBytes(String remotePath, byte[] data, String contentType,
+                         final WebDAVCallback<Boolean> callback) {
+        if (!isConfigured()) {
+            callback.onError(new Exception("WebDAV client not configured"));
+            return;
+        }
+        if (data == null) {
+            callback.onError(new Exception("内容为空"));
+            return;
+        }
+        String url = getDownloadUrl(remotePath);
+        RequestBody body = RequestBody.create(data,
+                MediaType.parse(contentType == null ? "application/octet-stream" : contentType));
+        Request request = new Request.Builder()
+                .url(url)
+                .put(body)
+                .header("Authorization", getBasicAuthHeader())
+                .header("If-None-Match", "*")
+                .build();
+        client.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                callback.onError(e);
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                try {
+                    int code = response.code();
+                    if (code >= 200 && code < 300) {
+                        callback.onSuccess(Boolean.TRUE);
+                    } else if (code == 412) {
+                        callback.onError(new Exception("服务器已有同名文件，未覆盖"));
+                    } else {
+                        callback.onError(new Exception("HTTP " + code));
+                    }
+                } finally {
+                    response.close();
+                }
+            }
+        });
+    }
+
     // 下载文件
     public void download(WebDAVFile file, File destFile, final ProgressCallback callback) {
         if (file == null) {

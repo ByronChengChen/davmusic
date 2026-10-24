@@ -18,6 +18,7 @@
 >   无模拟器），共 18 个类 / 9730 行
 > - v1.44：新增全屏歌词页（`LyricsActivity` / `LrcParser` / `LyricLineAdapter`），共 21 个类 / 10368 行
 > - v1.45：歌词列表加 96dp 上下留白 + `clipToPadding`，修复首行被顶栏遮挡；副标题改用 `[ar:]`
+> - v1.46：歌词搜索（LRCLIB）+ 选中后上传同名 `.lrc`（不覆盖已有文件），共 23 个类 / 10789 行
 
 ---
 
@@ -397,6 +398,8 @@ signature = hex(HMAC-SHA256(key = 令牌, msg = canonical))
 | 类 | 职责 |
 |----|------|
 | `FileUtils` | 扩展名判定（`isAudioFile` / `isImageFile` / `isLyricsFile`）、大小与时长格式化、路径操作 |
+| `LyricsQuery` | 文件名 → 搜索关键词（去扩展名与曲目编号，纯逻辑） |
+| `LyricsSearchClient` | LRCLIB 搜索与结果解析（只接受带时间轴的版本） |
 | `WebDAVResponseParser` | PROPFIND 响应解析（href 剥前缀 / URL 解码 / 剔除目录自身 / 属性与类型判定）；纯静态，不依赖 OkHttp 与 Context，由 `WebDAVClient` 委托调用 |
 | `NetworkUtils` | 网络连通性检测、网络类型判定、`getNetworkStatusString` 供 UI 显示在线/离线（R6.4） |
 
@@ -459,6 +462,15 @@ signature = hex(HMAC-SHA256(key = 令牌, msg = canonical))
 
 **缓存**：`filesDir/lyrics/<sha256(key) 前 16 位>.lrc`，先写 `.tmp` 再 rename；「清空缓存」
 一并删除该目录（`LocalCacheManager.clearAllCache`）。
+
+**歌词搜索（v1.46）**：`LyricsSearchClient` 调 LRCLIB `/api/search?q=`。选它是因为公开、免密钥、
+允许客户端调用，且中文曲库实测可用；⛔ 不要换成网易云/QQ 音乐的非官方接口。
+`LyricsQuery.fromFileName` 只做保守规范化（去扩展名、去 `10 `/`第10首` 前缀），
+**不拆「歌手 - 歌名」**：拆错比不拆更糟，用户在弹窗里能自己改关键词。
+结果只保留 `syncedLyrics` 非空的条目（纯文本塞进滚动页会让人以为坏了），按与当前曲目
+时长差排序。选中后先写本地缓存并显示，再 `putBytes` 上传到同目录同名 `.lrc`；
+上传用 `If-None-Match: *`，服务器已有同名文件返回 412 → 提示未覆盖。
+单次请求、429 即停，符合 AGENTS.md 的网络克制。
 
 ---
 
@@ -852,6 +864,29 @@ public interface OnPlaybackListener {
 | 编码 · GBK | 中文环境老歌词不得变乱码 |
 | 编码 · UTF-16LE | BOM 识别 |
 | 路径规则 | `歌.mp3 → 歌.lrc`；含点的文件名、无扩展名；空/目录路径返回 null |
+
+**`LyricsQueryTest`（JUnit，纯 JVM —— 已实现，6 个用例）**
+
+| 用例 | 说明 |
+|------|------|
+| 去曲目编号 | `10 爱…` / `01 - 夜曲` / `03.歌名` / `7、歌名` → 去掉编号 |
+| 中文编号 | `第10首 夜曲` → `夜曲` |
+| 年份前缀 | `2012 世界末日` 保持不变（四位数字不当作编号） |
+| 下划线 | 转空格 |
+| 空输入 | null / "" → "" |
+
+**`LyricsSearchClientTest`（Robolectric —— 已实现，8 个用例）**
+
+| 用例 | 说明 |
+|------|------|
+| 解析结果 | 字段完整、时长四舍五入 |
+| 过滤纯文本 | `syncedLyrics` 为空 → 不入选 |
+| 过滤纯音乐 | `instrumental=true` → 不入选 |
+| 空响应 | `[]` / `""` / null → 空列表 |
+| 错误对象 | 非数组 JSON → 抛异常（上层提示失败） |
+| 展示行 | 歌名 — 歌手 · 专辑 (m:ss) |
+| 时长排序 | 最接近当前歌曲的排前，时长未知排最后 |
+| 时长未知 | 不打乱原顺序 |
 
 **`MusicPlayerTest`（未实现；`nextIndexOf()` 可纯 JVM 测，其余需 ShadowMediaPlayer）**
 

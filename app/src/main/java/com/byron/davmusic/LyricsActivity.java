@@ -5,7 +5,11 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
@@ -47,6 +51,9 @@ public class LyricsActivity extends AppCompatActivity {
     private TextView trackTitle;
     private TextView trackSubtitle;
     private TextView statusView;
+    private LinearLayout statusContainer;
+    private Button searchButton;
+    private boolean searching;
 
     private List<LrcParser.Line> lines = new ArrayList<>();
     private String loadedKey;
@@ -98,6 +105,9 @@ public class LyricsActivity extends AppCompatActivity {
         trackTitle = findViewById(R.id.trackTitle);
         trackSubtitle = findViewById(R.id.trackSubtitle);
         statusView = findViewById(R.id.statusView);
+        statusContainer = findViewById(R.id.statusContainer);
+        searchButton = findViewById(R.id.searchLyricsButton);
+        searchButton.setOnClickListener(v -> showSearchDialog());
         lyricsList = findViewById(R.id.lyricsList);
 
         findViewById(R.id.backButton).setOnClickListener(v -> finish());
@@ -142,7 +152,7 @@ public class LyricsActivity extends AppCompatActivity {
             adapter.setLines(lines);
             trackTitle.setText(R.string.title_lyrics);
             trackSubtitle.setText("");
-            showStatus(getString(R.string.lyrics_no_track));
+            showStatus(getString(R.string.lyrics_no_track), false);
             return;
         }
 
@@ -164,17 +174,17 @@ public class LyricsActivity extends AppCompatActivity {
 
         final String lrcPath = siblingLrcPath(track.getRelativePath());
         if (lrcPath == null) {
-            showStatus(getString(R.string.lyrics_not_found));
+            showStatus(getString(R.string.lyrics_not_found), true);
             return;
         }
 
         WebDAVClient client = clientFor(track);
         if (client == null) {
-            showStatus(getString(R.string.lyrics_load_failed));
+            showStatus(getString(R.string.lyrics_load_failed), true);
             return;
         }
 
-        showStatus(getString(R.string.lyrics_loading));
+        showStatus(getString(R.string.lyrics_loading), false);
         client.fetchBytes(lrcPath, new WebDAVClient.WebDAVCallback<byte[]>() {
             @Override
             public void onSuccess(byte[] result) {
@@ -193,8 +203,9 @@ public class LyricsActivity extends AppCompatActivity {
                 runOnUiThread(() -> {
                     if (!key.equals(loadedKey)) return;
                     showStatus(notFound
-                            ? getString(R.string.lyrics_not_found)
-                            : getString(R.string.lyrics_load_failed));
+                                    ? getString(R.string.lyrics_not_found)
+                                    : getString(R.string.lyrics_load_failed),
+                            true);
                 });
             }
         });
@@ -206,7 +217,7 @@ public class LyricsActivity extends AppCompatActivity {
         lines = LrcParser.parse(text);
         adapter.setLines(lines);
         if (lines.isEmpty()) {
-            showStatus(getString(R.string.lyrics_not_found));
+            showStatus(getString(R.string.lyrics_not_found), true);
             return;
         }
         hideStatus();
@@ -265,6 +276,112 @@ public class LyricsActivity extends AppCompatActivity {
             int dy = v.getTop() - targetTop;
             if (Math.abs(dy) > 2) lyricsList.scrollBy(0, dy);
         });
+    }
+
+    // ---------------- 搜索歌词（LRCLIB） ----------------
+
+    private void showSearchDialog() {
+        WebDAVFile track = player == null ? null : player.getCurrentTrack();
+        if (track == null) return;
+
+        View content = getLayoutInflater().inflate(R.layout.dialog_lyrics_search, null);
+        EditText input = content.findViewById(R.id.queryInput);
+        input.setText(LyricsQuery.fromFileName(track.getDisplayName()));
+        input.setSelection(input.getText().length());
+
+        new android.app.AlertDialog.Builder(this)
+                .setTitle(R.string.lyrics_search_title)
+                .setView(content)
+                .setPositiveButton(R.string.lyrics_search_action,
+                        (d, w) -> startSearch(input.getText().toString()))
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void startSearch(String query) {
+        if (searching) return;
+        String q = query == null ? "" : query.trim();
+        if (q.isEmpty()) {
+            toast(getString(R.string.lyrics_search_hint));
+            return;
+        }
+        searching = true;
+        toast(getString(R.string.lyrics_searching));
+        int durationSec = player == null ? 0 : Math.max(0, player.getDuration() / 1000);
+        LyricsSearchClient.search(q, durationSec, new LyricsSearchClient.Callback() {
+            @Override
+            public void onSuccess(List<LyricsSearchClient.Result> results) {
+                runOnUiThread(() -> {
+                    searching = false;
+                    showSearchResults(results);
+                });
+            }
+
+            @Override
+            public void onError(String message) {
+                runOnUiThread(() -> {
+                    searching = false;
+                    toast(message);
+                });
+            }
+        });
+    }
+
+    private void showSearchResults(List<LyricsSearchClient.Result> results) {
+        if (results == null || results.isEmpty()) {
+            toast(getString(R.string.lyrics_search_empty));
+            return;
+        }
+        String[] items = new String[results.size()];
+        for (int i = 0; i < results.size(); i++) items[i] = results.get(i).displayLine();
+
+        new android.app.AlertDialog.Builder(this)
+                .setTitle(R.string.lyrics_search_pick)
+                .setItems(items, (d, which) -> applySearchResult(results.get(which)))
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void applySearchResult(LyricsSearchClient.Result result) {
+        if (result == null || loadedKey == null) return;
+        String text = result.syncedLyrics;
+        if (text == null || text.trim().isEmpty()) return;
+
+        // 先落本地缓存：上传失败、离线时都仍然可用
+        saveCache(loadedKey, text.getBytes(StandardCharsets.UTF_8));
+        applyLyrics(text, loadedKey);
+        if (!result.artistName.isEmpty()) trackSubtitle.setText(result.artistName);
+        toast(getString(R.string.lyrics_saved));
+        uploadLyrics(text);
+    }
+
+    /** 写到歌曲同目录的同名 .lrc；服务器已有同名文件时不覆盖（If-None-Match） */
+    private void uploadLyrics(String text) {
+        WebDAVFile track = player == null ? null : player.getCurrentTrack();
+        if (track == null || text == null || text.isEmpty()) return;
+        final String path = LrcParser.siblingLrcPath(track.getRelativePath());
+        WebDAVClient client = clientFor(track);
+        if (path == null || client == null) return;
+
+        client.putBytes(path, text.getBytes(StandardCharsets.UTF_8), "text/plain; charset=utf-8",
+                new WebDAVClient.WebDAVCallback<Boolean>() {
+                    @Override
+                    public void onSuccess(Boolean ok) {
+                        runOnUiThread(() -> toast(getString(R.string.lyrics_uploaded)));
+                    }
+
+                    @Override
+                    public void onError(Exception e) {
+                        String msg = e.getMessage() == null ? "" : e.getMessage();
+                        runOnUiThread(() -> toast(getString(R.string.lyrics_upload_failed, msg)));
+                    }
+                });
+    }
+
+    private void toast(String msg) {
+        if (msg != null && !msg.isEmpty()) {
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+        }
     }
 
     // ---------------- 网络与缓存 ----------------
@@ -338,13 +455,14 @@ public class LyricsActivity extends AppCompatActivity {
 
     // ---------------- 状态提示 ----------------
 
-    private void showStatus(String text) {
+    private void showStatus(String text, boolean allowSearch) {
         statusView.setText(text);
-        statusView.setVisibility(View.VISIBLE);
+        searchButton.setVisibility(allowSearch ? View.VISIBLE : View.GONE);
+        statusContainer.setVisibility(View.VISIBLE);
     }
 
     private void hideStatus() {
-        statusView.setVisibility(View.GONE);
+        statusContainer.setVisibility(View.GONE);
     }
 
     /** 供其它入口（如「更多」菜单）直接打开歌词页 */

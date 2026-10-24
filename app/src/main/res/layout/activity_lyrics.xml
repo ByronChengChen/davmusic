@@ -65,15 +65,32 @@
         </LinearLayout>
     </LinearLayout>
 
-    <!-- 状态提示：加载中 / 暂无歌词 / 加载失败 -->
-    <TextView
-        android:id="@+id/statusView"
+    <!-- 状态提示：加载中 / 暂无歌词 / 加载失败；无歌词时提供「搜索歌词」入口 -->
+    <LinearLayout
+        android:id="@+id/statusContainer"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
         android:gravity="center"
-        android:padding="32dp"
-        android:textColor="#99FFFFFF"
-        android:textSize="15sp"
-        android:visibility="gone" />
+        android:orientation="vertical"
+        android:padding="32dp">
+
+        <TextView
+            android:id="@+id/statusView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:textColor="#99FFFFFF"
+            android:textSize="15sp" />
+
+        <Button
+            android:id="@+id/searchLyricsButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:backgroundTint="#3D5AFE"
+            android:text="@string/lyrics_search_button"
+            android:textColor="#FFFFFF"
+            android:visibility="gone" />
+    </LinearLayout>
 </FrameLayout>

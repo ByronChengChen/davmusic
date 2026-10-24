@@ -156,4 +156,16 @@
     <string name="lyrics_not_found">暂无歌词</string>
     <string name="lyrics_load_failed">歌词加载失败</string>
     <string name="lyrics_no_track">当前没有播放中的歌曲</string>
+    <!-- 歌词搜索（LRCLIB） -->
+    <string name="lyrics_search_button">搜索歌词</string>
+    <string name="lyrics_search_title">搜索歌词</string>
+    <string name="lyrics_search_action">搜索</string>
+    <string name="lyrics_search_hint">歌名，或「歌手 歌名」</string>
+    <string name="lyrics_search_source_note">歌词来自 LRCLIB 公开歌词库。选中后保存到本地，并上传到歌曲所在目录（已有同名文件时不覆盖）。</string>
+    <string name="lyrics_search_pick">选择一个版本</string>
+    <string name="lyrics_search_empty">没有找到带时间轴的歌词</string>
+    <string name="lyrics_searching">正在搜索…</string>
+    <string name="lyrics_saved">歌词已保存</string>
+    <string name="lyrics_uploaded">歌词已上传到服务器</string>
+    <string name="lyrics_upload_failed">歌词已存本地；上传失败：%s</string>
 </resources>
