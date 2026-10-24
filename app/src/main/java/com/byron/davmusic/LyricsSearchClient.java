@@ -12,7 +12,6 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.Call;
-import okhttp3.Callback;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -111,7 +110,7 @@ public class LyricsSearchClient {
                 .get()
                 .build();
 
-        client().newCall(request).enqueue(new Callback() {
+        client().newCall(request).enqueue(new okhttp3.Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
                 callback.onError("搜索失败，请检查网络");
