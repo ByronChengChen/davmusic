@@ -406,7 +406,19 @@ public class LocalCacheManager {
                 }
             }
         }
-        
+
+        // 清空歌词缓存（LyricsActivity 的 filesDir/lyrics）。
+        // 歌词是派生数据，清缓存后重新打开歌曲会重新拉取，不需要保留。
+        File lyricsDir = new File(context.getFilesDir(), "lyrics");
+        if (lyricsDir.exists() && lyricsDir.isDirectory()) {
+            File[] lyricFiles = lyricsDir.listFiles();
+            if (lyricFiles != null) {
+                for (File file : lyricFiles) {
+                    file.delete();
+                }
+            }
+        }
+
         Log.d(TAG, "Cleared all cache");
     }
 

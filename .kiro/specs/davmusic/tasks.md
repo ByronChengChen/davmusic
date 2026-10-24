@@ -15,7 +15,8 @@
 > 新增任务 12–21 覆盖 v1.18 → v1.30 的实际迭代（多服务器、前台服务、离线索引等）；
 > 任务 22 覆盖 v1.39 播放模式；**任务 23–25 覆盖 v1.32 → v1.38 的写操作与上报鉴权**（2026-10-09 补记）；
 > 任务 26 覆盖 v1.42 排序方式与真实时间解析。
-> 本清单已与代码 **v1.43（18 个类 / 9730 行）** 对齐。
+> 任务 27 覆盖 v1.44 全屏歌词页（动态滚动）。
+> 本清单已与代码 **v1.44（21 个类 / 10368 行）** 对齐。
 
 ---
 
@@ -49,6 +50,7 @@
 | **24** | **左滑删除远端文件/目录（DELETE）** | `[x]` | R11.5–R11.7 | `WebDAVClient.deleteRemote`, `MainActivity` |
 | **25** | **上报鉴权改 HMAC + 端点可配** | `[x]` | R12.1–R12.7 | `RemoteLogger` |
 | **26** | **排序方式（修改时间 / 名称）+ 真实时间解析** | `[x]` | R13.1–R13.8 | `TrackSorter`, `HttpDateParser`, `FileListAdapter`, `MusicPlayer`, `MainActivity` |
+| **27** | **全屏歌词页（动态滚动）** | `[x]` | R14.1–R14.8 | `LyricsActivity`, `LrcParser`, `LyricLineAdapter`, `WebDAVClient.fetchBytes`, `MainActivity` |
 
 > **说明**：任务 1–9 由 Kiro 执行 agent 一次完成（9 个 Java 文件 / 2783 行）。
 > 任务 12–21 是后续在真机验证中迭代出来的实际工作，原 spec 未记录，本次补入。
@@ -667,6 +669,26 @@ requirements 曾把「播放模式」列在范围外。这次是补做，不是�
 
 ---
 
+## 任务 27 — 全屏歌词页（v1.44） `[x]`
+
+**目标**：点迷你播放器进入全屏页面，按播放进度滚动显示 LRC 歌词
+
+**实现**
+- [x] `LrcParser`：解析 `[mm:ss.xx]`（含一位/三位小数、`[mm:ss:xx]`）、一行多标签、
+      `[offset:±N]`、忽略元信息、按时间排序；编码回退 BOM → 严格 UTF-8 → GB18030
+- [x] `LrcParser.siblingLrcPath`：`歌.mp3 → 歌.lrc`（同目录同名，v1 不支持模糊匹配）
+- [x] `WebDAVClient.fetchBytes`：单次 GET 到内存，不落盘/不计数/不重试
+- [x] `LyricsActivity` + `activity_lyrics.xml`：深色全屏、当前行居中、返回不中断播放
+- [x] `LyricLineAdapter` + `item_lyric_line.xml`：固定行高，高亮行字号/颜色变化不改变布局
+- [x] 同步：80ms 轮询 `getCurrentPosition()`（不用 1 秒一次的 `onProgress`），
+      行号变化才 `smoothScrollBy`；`onStart` 启动、`onStop` 停止
+- [x] 切歌跟随；过期请求按 cacheKey 丢弃；`onDestroy` 注销监听
+- [x] 缓存 `filesDir/lyrics`（.tmp + rename），「清空缓存」一并清除
+- [x] `MainActivity` 迷你播放器点击入口（原先只是 toast 占位）
+- [x] `LrcParserTest`：19 个用例（解析/偏移/排序/UTF-8/GBK/路径）
+
+**演示**：CI `testDebugUnitTest` 通过；真机点迷你播放器 → 歌词随播放滚动
+
 ## 依赖关系
 
 ```
@@ -705,6 +727,6 @@ requirements 曾把「播放模式」列在范围外。这次是补做，不是�
 | 脚手架与核心功能（1–9） | 全部完成 |
 | CI 与产物（10） | 完成（可出包，真机可装） |
 | 单元测试（11） | **部分完成**：6 个测试类 / 62 个用例已接入 CI（纯 JVM + Robolectric，无模拟器）；`MusicPlayerTest`、`NetworkUtilsTest` 待补 |
-| 真机迭代增强（12–26） | 全部完成 |
+| 真机迭代增强（12–27） | 全部完成 |
 
-**代码规模**：18 个类 / 9730 行（v1.43；v1.42 为 17 个类 / 9680 行；v1.39 为 15 个类 / 9247 行；初版为 9 个类 / 2783 行）
+**代码规模**：21 个类 / 10368 行（v1.44；v1.43 为 18 个类 / 9730 行；v1.42 为 17 个类 / 9680 行；v1.39 为 15 个类 / 9247 行；初版为 9 个类 / 2783 行）

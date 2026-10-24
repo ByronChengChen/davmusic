@@ -166,6 +166,47 @@ public class WebDAVClient {
         });
     }
 
+    /**
+     * 读取一个小文件（歌词等）到内存，不落盘、不计数、不重试。
+     *
+     * 与 download 的区别：歌词是「有就显示、没有就算了」的附属数据，
+     * 不该占用下载索引，也不该在 404 时弹播放错误。调用方按异常信息里的
+     * HTTP 状态码区分「没有这个文件」和「真的失败了」。
+     */
+    public void fetchBytes(String remotePath, final WebDAVCallback<byte[]> callback) {
+        if (!isConfigured()) {
+            callback.onError(new Exception("WebDAV client not configured"));
+            return;
+        }
+        String url = getDownloadUrl(remotePath);
+        Request request = new Request.Builder()
+                .url(url)
+                .header("Authorization", getBasicAuthHeader())
+                .get()
+                .build();
+        client.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                callback.onError(e);
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                try {
+                    if (response.isSuccessful() && response.body() != null) {
+                        callback.onSuccess(response.body().bytes());
+                    } else {
+                        callback.onError(new Exception("HTTP " + response.code()));
+                    }
+                } catch (IOException e) {
+                    callback.onError(e);
+                } finally {
+                    response.close();
+                }
+            }
+        });
+    }
+
     // 下载文件
     public void download(WebDAVFile file, File destFile, final ProgressCallback callback) {
         if (file == null) {

@@ -16,6 +16,7 @@
 >   **前台服务与 MediaSession**、**本地离线索引**、**定位当前歌曲**，共 15 个类 / 7634 行
 > - v1.43：XML 解析抽成 `WebDAVResponseParser`（纯 JVM 可测），单元测试接入 CI（JUnit + Robolectric，
 >   无模拟器），共 18 个类 / 9730 行
+> - v1.44：新增全屏歌词页（`LyricsActivity` / `LrcParser` / `LyricLineAdapter`），共 21 个类 / 10368 行
 
 ---
 
@@ -431,6 +432,30 @@ signature = hex(HMAC-SHA256(key = 令牌, msg = canonical))
    `preloadedPosition`，避免白拉一路流。正在 prepare 中的目标一律取消重来
    （其 `onPrepared` 捕获的是旧下标，无法安全重映射）。
 4. 全程不 stop / reset / release 当前播放器，也不调用 `playFile()`（R13.5）。
+
+### 2.9 LyricsActivity（全屏歌词，v1.44）
+
+| 件 | 职责 |
+|----|------|
+| `LyricsActivity` | 全屏页面：加载歌词、80ms 轮询 `getCurrentPosition()`、行号变化时滚动居中 |
+| `LrcParser` | 纯逻辑：LRC 解析 + 编码回退 + 同名 `.lrc` 路径推导（纯 JVM 可测） |
+| `LyricLineAdapter` | 只负责「哪一行高亮」；滚动由 Activity 控制 |
+| `WebDAVClient.fetchBytes` | 单次 GET 到内存：不落盘、不计数、不重试；404/403 由调用方当「无歌词」 |
+
+**数据获取**：列表过滤掉了歌词条目（R3.5），所以不知道文件是否存在。做法是按同名规则
+直接拼出路径 GET 一次（`歌.mp3 → 歌.lrc`），404/403 → 「暂无歌词」，其它错误 → 「加载失败」。
+⛔ 不要为此去列目录：一次多目录 PROPFIND 换一个「可能不存在」的文件，违背请求预算。
+
+**同步**：`MusicPlayer.onProgress` 是 1 秒一次，不能用来驱动滚动；页面用 80ms 轮询
+（纯内存读）+ `findViewByPosition` 计算 dy 后 `smoothScrollBy`。轮询只在 `onStart`/`onStop`
+之间运行。切歌由 `onTrackChanged` 触发重载，请求返回时用「当前 key 是否还是发起时那首」
+丢弃过期结果。
+
+**编码**：BOM → 严格 UTF-8 → GB18030 → 宽松 UTF-8。顺序不能变：GB18030 几乎不会解码
+失败，放在严格 UTF-8 之前会把所有 UTF-8 文件抢走。
+
+**缓存**：`filesDir/lyrics/<sha256(key) 前 16 位>.lrc`，先写 `.tmp` 再 rename；「清空缓存」
+一并删除该目录（`LocalCacheManager.clearAllCache`）。
 
 ---
 

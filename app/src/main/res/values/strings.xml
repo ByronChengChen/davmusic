@@ -149,4 +149,11 @@
     <string name="error_folder_name_separator">名称不能包含 / 或 \\</string>
     <string name="error_folder_name_invalid">名称不合法</string>
     <string name="error_folder_name_too_long">名称过长（最多 100 个字符）</string>
+
+    <!-- 歌词页 -->
+    <string name="title_lyrics">歌词</string>
+    <string name="lyrics_loading">正在加载歌词…</string>
+    <string name="lyrics_not_found">暂无歌词</string>
+    <string name="lyrics_load_failed">歌词加载失败</string>
+    <string name="lyrics_no_track">当前没有播放中的歌曲</string>
 </resources>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 单行歌词：高度固定，保证「居中定位」计算准确；字号变化不改变行高 -->
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/lyricText"
+    android:layout_width="match_parent"
+    android:layout_height="72dp"
+    android:gravity="center"
+    android:paddingStart="24dp"
+    android:paddingEnd="24dp"
+    android:maxLines="2"
+    android:ellipsize="end"
+    android:lineSpacingExtra="2dp"
+    android:textColor="#80FFFFFF"
+    android:textSize="16sp" />

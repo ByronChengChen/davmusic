@@ -363,8 +363,12 @@ public class MainActivity extends AppCompatActivity implements
         });
         
         miniPlayerLayout.setOnClickListener(v -> {
-            // 可以在这里实现点击播放器展开详细播放界面的功能
-            toast("点击了播放器", Toast.LENGTH_SHORT);
+            // 展开全屏歌词页。没有播放中的歌曲时入口不存在（迷你播放器本身是隐藏的），
+            // 这里再挡一次，避免空状态进到一个空页面。
+            if (musicPlayer == null || musicPlayer.getCurrentTrack() == null) {
+                return;
+            }
+            LyricsActivity.start(this);
         });
         
         // 上传按钮
