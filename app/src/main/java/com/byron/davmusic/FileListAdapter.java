@@ -77,21 +77,26 @@ public class FileListAdapter extends RecyclerView.Adapter<FileListAdapter.ViewHo
     }
 
     /**
-     * 排序：文件夹在前，音频文件在后；同类按名称排序（区分大小写不敏感）。
+     * 排序：文件夹在前；同类按当前排序偏好排（见 TrackSorter）。
+     *
+     * 排序规则不在这里写死 —— 列表与播放队列必须共用 TrackSorter 的比较器，
+     * 否则「界面顺序」与「下一首顺序」会分叉。
      */
     private List<WebDAVFile> sortFiles(List<WebDAVFile> list) {
         List<WebDAVFile> result = new ArrayList<>(list);
-        Collections.sort(result, (a, b) -> {
-            // 1) 文件夹优先
-            if (a.isCollection() != b.isCollection()) {
-                return a.isCollection() ? -1 : 1;
-            }
-            // 2) 同类型按名称
-            String na = a.getDisplayName() != null ? a.getDisplayName() : "";
-            String nb = b.getDisplayName() != null ? b.getDisplayName() : "";
-            return na.compareToIgnoreCase(nb);
-        });
+        Collections.sort(result, TrackSorter.comparator(TrackSorter.getMode(context)));
         return result;
+    }
+
+    /**
+     * 切换排序方式：持久化 + 立即重排当前列表。
+     *
+     * 纯本地操作，不发起任何网络请求（目录内容不会因为排序而重新拉取）。
+     */
+    public void setSortMode(int mode) {
+        TrackSorter.setMode(context, mode);
+        this.files = sortFiles(this.files);
+        notifyDataSetChanged();
     }
     
     public void setOfflineMode(boolean offlineMode) {

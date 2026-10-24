@@ -787,7 +787,13 @@ public class WebDAVClient {
 
                     String lastModified = getElementText(prop, "DAV:", "getlastmodified");
                     if (lastModified != null) {
-                        file.setLastModified(System.currentTimeMillis());
+                        // 【关键】必须用服务器返回的真实时间。
+                        // 旧实现读了这一段文本却把它丢掉，直接
+                        // setLastModified(System.currentTimeMillis())，
+                        // 于是「文件时间」变成了「这次列目录的时刻」：
+                        // 每刷新一次全目录的时间都变，任何按时间排序都会
+                        // 在两次刷新之间自己乱跳。详见 HttpDateParser。
+                        file.setLastModified(HttpDateParser.parse(lastModified));
                     }
 
                     String contentType = getElementText(prop, "DAV:", "getcontenttype");

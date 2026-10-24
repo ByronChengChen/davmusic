@@ -22,6 +22,11 @@
         app:showAsAction="never" />
 
     <item
+        android:id="@+id/menu_sort"
+        android:title="@string/menu_sort"
+        app:showAsAction="never" />
+
+    <item
         android:id="@+id/menu_locate_current"
         android:title="@string/menu_locate_current"
         app:showAsAction="never" />

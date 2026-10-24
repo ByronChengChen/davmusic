@@ -98,6 +98,11 @@
 
     <!-- ===== 定位到当前歌曲（主界面「更多」菜单）===== -->
     <string name="menu_locate_current">定位到当前歌曲</string>
+    <string name="menu_sort">排序方式</string>
+    <string name="sort_by_time">按修改时间（最新在前）</string>
+    <string name="sort_by_name">按名称</string>
+    <string name="msg_sort_time">已按修改时间排序（最新在前）</string>
+    <string name="msg_sort_name">已按名称排序</string>
     <string name="msg_no_track_playing">当前没有正在播放的歌曲</string>
     <string name="msg_list_not_ready">列表还没加载完，稍后再试</string>
     <string name="msg_located_track">已定位到：%s</string>

@@ -10,6 +10,7 @@ import android.util.Log;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -818,6 +819,92 @@ public class MusicPlayer {
         if (currentPosition >= 0 && currentPosition < this.playlist.size()) {
             WebDAVFile currentTrack = this.playlist.get(currentPosition);
             notifyTrackChanged(currentTrack);
+        }
+    }
+
+    /**
+     * 按新的排序规则重排【已有播放队列】，正在播的那首不动。
+     *
+     * 为什么不能拿界面上的可见列表直接 setPlaylist()：
+     * 队列是点击播放时从目录列表拷贝的快照，可能包含用户已经翻走的
+     * 目录里的条目；用可见列表覆盖会静默丢掉这些条目，正在播的那首
+     * 也可能被踢出队列 —— getCurrentTrack() 返回 null，迷你播放器变空白。
+     * 所以这里只对现有条目重排，按条目身份（isSameTrack）重新定位当前曲目。
+     *
+     * 播放本身完全不碰：不 stop/reset/release 当前 MediaPlayer，
+     * 也不重新调用 playFile()（那会让当前这首歌从头开始）。
+     *
+     * 唯一必须处理的副作用是预加载：preloadedPosition / preparingPosition
+     * 存的是下标，重排后全部失效。做两件事：
+     *   ① 如果已挂载的下一首在新顺序里仍然是「下一首」→ 只改下标，不动实例，
+     *      避免白拉一路流（AGENTS.md 的网络预算）
+     *   ② 否则取消并按新顺序重挂；正在 prepare 中的目标一律取消重来 ——
+     *      它的 onPrepared 回调捕获的是【旧下标】，无法安全重映射
+     */
+    public void reorderPlaylist(java.util.Comparator<WebDAVFile> comparator) {
+        if (comparator == null) return;
+        if (playlist == null || playlist.size() < 2) return;
+
+        final WebDAVFile current = getCurrentTrack();
+        final WebDAVFile mountedNext =
+                (preloadedPosition >= 0 && preloadedPosition < playlist.size())
+                        ? playlist.get(preloadedPosition) : null;
+
+        Collections.sort(playlist, comparator);
+
+        // 按身份（href/relativePath）找回当前曲目的新下标。
+        // 不能沿用旧下标：排序后同一个数字指向的是完全不同的歌。
+        int newPos = current == null ? -1 : indexOfFile(current);
+        if (newPos >= 0) {
+            currentPosition = newPos;
+        } else if (current == null) {
+            // 没有在播的曲目：下标本来就没有意义，保持 -1 即可
+            currentPosition = -1;
+        }
+
+        // 新顺序下的「下一首」
+        int desired = nextIndexOf(playMode, currentPosition, playlist.size(), false);
+        WebDAVFile desiredTrack = (desired >= 0 && desired < playlist.size())
+                ? playlist.get(desired) : null;
+
+        boolean keepMounted = mountedNext != null && desiredTrack != null
+                && isSameTrack(mountedNext, desiredTrack);
+
+        // 随机模式没有「顺序」可言：已经挂上的下一首没必要因为重排而作废
+        // （重算会随机到另一首，白白多拉一路流）。只把它的下标改成新位置。
+        if (playMode == MODE_SHUFFLE && mountedNext != null) {
+            int idx = indexOfFile(mountedNext);
+            if (idx >= 0) {
+                preloadedPosition = idx;
+                keepMounted = true;
+                desired = idx;
+                desiredTrack = mountedNext;
+            }
+        }
+
+        if (keepMounted) {
+            // 目标没变，只是下标变了 —— 不重拉流
+            preloadedPosition = desired;
+            rlog.i(TAG, "重排播放列表：沿用已挂载的下一首「"
+                    + desiredTrack.getDisplayName() + "」，新下标 " + desired);
+        } else {
+            int oldTarget = (preloadedPosition >= 0) ? preloadedPosition : preparingPosition;
+            if (oldTarget >= 0 || desired >= 0) {
+                cancelPreloadedTrack();
+                if (desired >= 0) prepareNextTrack();
+            }
+            rlog.i(TAG, "重排播放列表：下一首目标变化 "
+                    + oldTarget + " → " + desired);
+        }
+
+        rlog.i(TAG, "重排播放列表完成: size=" + playlist.size()
+                + " 当前下标=" + currentPosition
+                + (current != null ? " 曲目=" + current.getDisplayName() : ""));
+
+        // 通知 UI 重新对齐（迷你播放器标题 + 列表高亮）。
+        // 这次通知不代表切歌 —— 播放状态与进度都不受影响。
+        if (current != null) {
+            notifyTrackChanged(current);
         }
     }
     

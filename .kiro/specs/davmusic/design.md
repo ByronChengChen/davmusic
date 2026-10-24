@@ -36,7 +36,9 @@
 │  ├─ MusicService            前台服务 + MediaSession + 通知栏     │
 │  ├─ LocalCacheManager       下载缓存 + 快照 + 离线索引（按作用域）│
 │  ├─ ServerStore             服务器配置读写与活动服务器解析        │
-│  └─ RemoteLogger            远程日志上报（真机诊断）             │
+│  ├─ RemoteLogger            远程日志上报（真机诊断）             │
+│  ├─ TrackSorter             列表/队列共用的排序比较器（v1.42）    │
+│  └─ HttpDateParser          getlastmodified 解析（RFC/ISO，v1.42）│
 ├──────────────────────────────────────────────────────────────┤
 │  数据层                                                        │
 │  ├─ OkHttp                 网络传输（每服务器一个 client 实例）  │
@@ -122,8 +124,18 @@
 | `listFolder(path, callback)` | PROPFIND 列目录 |
 | `download(remote, dest, progressCb)` | 下载到本地（带进度） |
 | `upload(local, remote, progressCb)` | PUT 上传（带进度） |
+| `createFolder(remotePath, cb)` | **MKCOL 新建文件夹**（v1.38，R11.1–R11.4） |
+| `deleteRemote(remotePath, isCollection, cb)` | **DELETE 删除远端文件/目录**（v1.36，R11.5–R11.6） |
 | `getDownloadUrl(remotePath)` | 拼出可 GET 的完整 URL（含编码） |
 | `testConnection(cb)` | 配置页连接测试 |
+
+**写操作的两条防御（真机上踩过）**
+
+- **空路径必须挡住**：`createFolder("")` / `deleteRemote("")` 会退化成对**服务器根目录**发 MKCOL / DELETE，
+  因此在客户端入口直接拒绝空路径。
+- **响应必须校验实际方法**：重定向会让 OkHttp 把 `DELETE` 改写成 `GET`（301 到带斜杠的规范地址时尤其容易），
+  因此回调里要比较 `response.request().method()` 是否仍等于 `MKCOL` / `DELETE`，
+  否则会把「其实没删掉」当成成功。
 
 ### 2.2 ServerStore / ServerProfile（服务器配置与作用域）
 
@@ -220,6 +232,7 @@ public class ServerProfile {
 | 进度更新 | 定时回调当前位置（服务侧 1s 与通知同频，UI 侧 500ms） |
 | 播放列表 | 持有 `List<WebDAVFile>` 与当前索引，支持上一首/下一首 |
 | **播放模式** | 顺序播放 / 列表循环（默认）/ 单曲循环 / 随机播放；见下方「播放模式设计」（R5.11–R5.14） |
+| **重排队列** | `reorderPlaylist(comparator)` 只重写列表顺序、当前索引与预加载目标，**不碰 MediaPlayer**（R13.5–R13.6） |
 | 状态回调 | `OnPlaybackListener`：`onTrackChanged` / `onPlayStateChanged` / `onProgress` / `onPlayModeChanged` / `onError` |
 | 错误抑制 | 切歌过程中抑制中间态误报错误（R5.10） |
 | 资源释放 | `release()` 停止轮询、释放 MediaPlayer、清空监听器 |
@@ -286,11 +299,43 @@ playFile(WebDAVFile file):
 
 ### 2.5 RemoteLogger（诊断）
 
-**职责**：把关键路径的日志上报到远端，用于真机定位难以复现的问题（尤其是锁屏/后台播放，无法连 IDE 看 logcat）。
+**职责**：把关键路径的日志上报到远端，用于真机定位难以复现的问题（尤其是锁屏/后台播放，无法连 IDE 看 logcat）（N9 / R12）。
 
 - 提供 `i` / `w` / `e` 级别方法，带 TAG
 - 日志写入本地缓冲并批量上报，避免频繁网络请求
-- 典型用途：定位"锁屏后台切歌失败"、"预加载被自己销毁"等仅在真机长时运行下出现的问题（N9）
+- 典型用途：定位"锁屏后台切歌失败"、"预加载被自己销毁"等仅在真机长时运行下出现的问题
+- **上报成功即精确清理该份内容**，避免下次重复上传（v1.34，R12.6）
+
+**端点（R12.1）**
+
+- 端点的「主机:端口」**由用户在 App 内配置**，源码里不含任何收集端地址；
+  **未配置时上报直接跳过**，不会去连默认地址 —— 这样源码里就不存在可被指认的收集端
+- 用户漏填协议头时自动补 `http://`（v1.37）
+
+**鉴权：HMAC-SHA256，凭据绝不进仓库（R12.2 / R12.3）**
+
+v1.33 由 Basic Auth 改为签名鉴权。原因是一次真实事故：旧实现把「用户名 + 口令」明文写成
+`RemoteLogger.ENDPOINTS` 里的常量，而本仓库是公开的 —— 等于把收集端凭据一起公开了。
+
+```
+canonical = "PUT\n" + path + "\n" + timestamp + "\n" + nonce + "\n" + sha256hex(body)
+signature = hex(HMAC-SHA256(key = 令牌, msg = canonical))
+```
+
+请求头：`X-Davmusic-Timestamp` / `X-Davmusic-Nonce` / `X-Davmusic-Body-Sha256` / `X-Davmusic-Signature`
+
+- **令牌由用户手动输入**（菜单 → 设置上报令牌），存在应用私有 SharedPreferences，**从不离开设备**
+- 时间窗 ±300 秒；重放靠 nonce 去重（仅验签通过的 nonce 入表）
+- 链路上嗅探只能拿到一次性签名：既不能伪造新请求，也不能重放
+- **时钟偏移必须显式暴露**（R12.4）：服务端超窗回 `401` + `X-Davmusic-Error: clock_skew`，
+  App 据此提示「设备时间不准」，**不得静默失败** —— 否则就退化成「以为传了其实没传」
+- 手动上报走 `RemoteLogger.UploadCallback`，结果用 Toast 告知（R12.5）
+- 收集端令牌存在仅属主可读的独立文件（权限 600），配置文件只存其路径 ——
+  配置文件被复制或贴出也不带出秘密
+- ⛔ **不要把任何凭据写回源码**，也不要为「更安全」把签名逻辑挪进 `.so`：
+  令牌不在 `.so` 里，HMAC-SHA256 是公开标准，挪进去安全性质不变，只会引入 NDK 代价并与「纯 Java」冲突
+
+**历史**：v1.32 曾同时上报本机与远端两个收集端点互为备份，后收敛为单端点 + 签名鉴权。
 
 ### 2.6 UI 层
 
@@ -308,14 +353,15 @@ playFile(WebDAVFile file):
 - 删除时同步清理该作用域下的缓存与快照
 - 可通过 `EXTRA_ENTER_SERVER_ID` 直接进入指定服务器
 
-**MainActivity**（2266 行，最大的类）
+**MainActivity**（3045 行，最大的类，v1.42）
 
 | 区域 | 内容 |
 |------|------|
 | 顶部 | 返回按钮 + 面包屑路径（含服务器名）+ 在线/离线状态标识 |
 | 中部 | RecyclerView 列表（**根层级显示服务器列表，进入服务器后显示文件列表**） |
 | 底部 | 迷你播放器（曲目名 / 播放暂停 / 上下一首 / 进度条 / 时间） |
-| 菜单 | 上传、服务器管理、定位到当前歌曲、关于 |
+| 上传 | 右下角悬浮按钮 `fabUpload`（不在菜单里）；离线或未进入服务器时给提示 |
+| 菜单 | **新建文件夹**（仅在已进入某台服务器时可见）、**排序方式**（同上，v1.42）、刷新、服务器管理、定位到当前歌曲、设置/缓存/日志、关于 |
 
 关键逻辑：
 
@@ -332,7 +378,12 @@ playFile(WebDAVFile file):
 **FileListAdapter**
 
 - 两种 viewType：文件夹 / 文件
-- 音频条目右侧三态 UI：下载按钮（未下载）· 进度条（下载中）· 删除按钮（已下载）
+- **可见性过滤集中在 `setFiles()`：只保留文件夹与音频**，图片/歌词/文档/系统文件一律丢弃
+  （适配器内保留图片与歌词的图标分支，但被过滤挡住、不可达；见 requirements R3.5）
+- 音频条目右侧三态 UI：下载按钮（未下载）· 进度条（下载中）· 删除按钮（已下载，**只删本地**）
+- **左滑删除作用于远端**（`ItemTouchHelper` + 条目背后红底「删除」）：
+  行内已经承载下载状态与进度条，再加按钮会放大误触；删除是破坏性操作，用左滑手势而非按钮
+  （v1.36，R11.5）
 - **已下载条目文字色 `#4CAF50`（绿色），未下载用默认色**（R4.3 / R4.4）
 - 提供 `updateDownloadState(href, state)` 做局部刷新，避免整表重绘
 - **ViewHolder 复用需重置全部状态**，否则出现列表渲染错乱（v1.21 真因）
@@ -346,6 +397,37 @@ playFile(WebDAVFile file):
 
 **音频扩展名白名单**（R3.1）：
 `mp3` · `m4a` · `flac` · `wav` · `wma` · `aac` · `ogg` · `ape` · `opus`（大小写不敏感）
+
+### 2.8 TrackSorter（排序，v1.42）
+
+**职责**：为**目录列表**与**播放队列**提供同一个比较器。做成独立类而不是各写一份，
+是因为两处规则一旦分叉，会出现「界面顺序」与「下一首顺序」不一致 —— 表现为点下一首
+跳到了屏幕上不相邻的歌。
+
+| 要点 | 做法 |
+|------|------|
+| 模式 | `MODE_TIME`（默认，最新在前）/ `MODE_NAME`；持久化在 `player_prefs` 的 `file_sort_mode` |
+| 文件夹 | **始终置顶**，组内按当前规则排序（含按时间，R13.4） |
+| 时间 | 倒序；`lastModified == 0`（未知）**沉到底部**，不冒充「最旧」 |
+| 名称 | 中文 `Collator`（PRIMARY，忽略大小写）+ 数字自然序（`2` < `10`） |
+| 确定性 | 时间相同 → 名称 → 相对路径 → serverId，逐级兜底，保证刷新前后顺序稳定 |
+| 单点应用 | `FileListAdapter.setFiles()` 每次渲染都排序，因此后台静默刷新不会冲掉偏好 |
+
+**时间数据必须是真的**：`WebDAVClient` 曾把 `getlastmodified` 读出来后**丢弃**，
+改设 `System.currentTimeMillis()`，等于「文件时间 = 这次列目录的时刻」。现在由
+`HttpDateParser` 解析（RFC 1123 / RFC 850 / asctime / ISO-8601，整串消费完才算成功），
+解析失败返回 0。⛔ 不要改回 `now()` —— 时间排序会立刻退化成「随机」。
+
+**重排播放队列的约束**（`MusicPlayer.reorderPlaylist`）：
+
+1. 只排**现有队列**，不拿可见列表重建 —— 队列可能含别的目录的条目，覆盖会丢条目，
+   甚至让 `getCurrentTrack()` 变 null（迷你播放器空白）。
+2. 当前索引按 `isSameTrack` 重新查找，**不能沿用旧下标**。
+3. 预加载按**曲目身份**判断，不按下标：`setPlayMode()` 那种下标比较只在顺序未变时成立。
+   目标变了才 `cancelPreloadedTrack()` + `prepareNextTrack()`；目标没变只改
+   `preloadedPosition`，避免白拉一路流。正在 prepare 中的目标一律取消重来
+   （其 `onPrepared` 捕获的是旧下标，无法安全重映射）。
+4. 全程不 stop / reset / release 当前播放器，也不调用 `playFile()`（R13.5）。
 
 ---
 
@@ -405,7 +487,10 @@ cacheKey = scopeId + "::" + remotePath
 
 不单独建类，直接用 `List<WebDAVFile>` + 当前索引表示。播放列表来自"当前文件夹的全部音频文件"，简化了跨目录队列的复杂度。
 
-**与初版的差异**：播放列表现在由 `MusicService` 持有并跨 Activity 生命周期存活，Activity 销毁重建不影响播放；服务通过 MediaSession 与系统媒体控制中心保持同步。
+**与初版的差异**：播放列表由 `MusicPlayer` 单例（进程级）持有，跨 Activity 生命周期存活，Activity 销毁重建不影响播放；播放器由 `MusicService` 前台服务托管，通过 MediaSession 与系统媒体控制中心保持同步。
+
+**与目录列表的关系**：播放列表是**点击播放那一刻的快照**（只含音频）。之后刷新目录、切换目录都不会改动它；
+排序改变时按 R13.6 重排这份队列，而不是用可见列表覆盖。
 
 ---
 
@@ -539,6 +624,20 @@ NetworkUtils 回调检测到由离线 → 在线
   → 旧服务器的快照/下载映射保持独立，不受影响
 ```
 
+### 4.8 改变排序方式（对应 R13）
+
+```
+用户在"更多"菜单选择"排序方式" → 选定"按修改时间"或"按名称"
+  → TrackSorter.setMode() 持久化（全局一份）
+  → FileListAdapter.setSortMode()：对内存里的可见列表重排 + notifyDataSetChanged（不发请求）
+  → MusicPlayer.reorderPlaylist(TrackSorter.comparator(mode))
+        · 按 isSameTrack 重新定位 currentPosition
+        · 预加载按曲目身份比对：同一首只改下标，不同则 cancel + prepareNextTrack
+        · 不碰 MediaPlayer，正在播的歌继续播（R13.5）
+  → post 到下一帧后 scrollToPositionWithOffset(当前曲目, 视口 1/3)（R13.7）
+  → 当前曲目不在本目录时 scrollToPosition(0)
+```
+
 ---
 
 ## 5. 接口契约
@@ -594,6 +693,9 @@ public interface OnPlaybackListener {
 | XML 解析失败 | 跳过该条目，不中断整个列表 | R2.8 |
 | 下载中断 | 删除不完整临时文件，状态回退为未下载 | R4.8 |
 | 上传失败 | Toast 提示，不影响其他功能 | R7.5 |
+| **新建文件夹失败** | 按状态码提示：`401`/`403`/`429` 与删除同源；`405` 同名已存在或服务端不支持；`409` 父目录不存在；`415` 不接受请求体（v1.38） | R11.4 |
+| **远端删除失败** | 按 `401` / `403` / `429` 给出可排障提示（v1.36） | R11.6 |
+| **写操作被重定向** | 校验 `response.request().method()` 仍是 `MKCOL`/`DELETE`，避免把 GET 的 2xx 当成写成功 | R11.2 / R11.5 |
 | 播放失败（格式不支持/网络断） | `onError` 回调 → 提示并跳过到下一首 | R5.7 |
 | **切歌过程中的中间态错误** | **抑制误报**，不弹错误提示（v1.26 修复） | R5.10 |
 | 缓冲态 | 保持稳定不崩溃，缓冲结束继续播放 | R5.9 |

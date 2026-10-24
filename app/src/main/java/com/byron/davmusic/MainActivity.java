@@ -2226,6 +2226,11 @@ public class MainActivity extends AppCompatActivity implements
             newFolder.setVisible(inServer);
             menuInServerState = inServer;
         }
+        MenuItem sort = menu.findItem(R.id.menu_sort);
+        if (sort != null) {
+            // 根目录列的是服务器本身，没有文件时间可排
+            sort.setVisible(currentServer != null);
+        }
         return super.onPrepareOptionsMenu(menu);
     }
     
@@ -2236,6 +2241,15 @@ public class MainActivity extends AppCompatActivity implements
         if (id == R.id.menu_new_folder) {
             // 新建文件夹：在当前服务器的当前目录下发 MKCOL（直接落到服务器上）
             showNewFolderDialog();
+            return true;
+        } else if (id == R.id.menu_sort) {
+            // 排序方式：只影响当前列表与播放队列，不重新请求目录。
+            // 服务器根目录（列的是服务器本身）没有"文件时间"可排，给个提示。
+            if (currentServer == null) {
+                toast("请先进入某个服务器再排序", Toast.LENGTH_SHORT);
+                return true;
+            }
+            showSortDialog();
             return true;
         } else if (id == R.id.menu_locate_current) {
             // 定位到当前正在播放的歌曲。
@@ -2686,7 +2700,115 @@ public class MainActivity extends AppCompatActivity implements
         syncUiWithPlayer();
     }
 
-    // ==================== 新功能①：定位到当前歌曲 ====================
+    // ==================== 新功能①：排序方式 ====================
+
+    /**
+     * 选择排序方式的对话框。
+     *
+     * 只有两种：按修改时间（默认，最新在前）/ 按名称。
+     * 选择立即生效，不发起任何网络请求 —— 目录内容不变，只是重排。
+     */
+    private void showSortDialog() {
+        final int current = TrackSorter.getMode(this);
+        final String[] items = {
+                getString(R.string.sort_by_time),
+                getString(R.string.sort_by_name)
+        };
+        final int checked = (current == TrackSorter.MODE_TIME) ? 0 : 1;
+
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.menu_sort)
+                .setSingleChoiceItems(items, checked, (dialog, which) -> {
+                    dialog.dismiss();
+                    applySortMode(which == 0 ? TrackSorter.MODE_TIME : TrackSorter.MODE_NAME);
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /**
+     * 应用排序方式：列表 + 播放队列一起改，正在播的歌不受影响。
+     *
+     * 顺序很重要：
+     *   ① 先持久化并重排可见列表（纯本地）
+     *   ② 再重排播放队列（MusicPlayer 内部只改下标，不碰 MediaPlayer）
+     *   ③ 最后把正在播的那首滚进可见区域
+     *
+     * 播放队列不能用「当前可见列表」重建 —— 队列里可能有别的目录的条目，
+     * 见 MusicPlayer.reorderPlaylist() 的注释。
+     */
+    private void applySortMode(int mode) {
+        TrackSorter.setMode(this, mode);
+
+        if (fileListAdapter != null) {
+            fileListAdapter.setSortMode(mode);
+        }
+        if (musicPlayer != null) {
+            musicPlayer.reorderPlaylist(TrackSorter.comparator(mode));
+        }
+
+        if (rlog != null) {
+            rlog.i(TAG, "排序方式切换: " + (mode == TrackSorter.MODE_TIME ? "修改时间" : "名称")
+                    + " currentPath=" + currentPath);
+        }
+
+        scrollToPlayingTrack();
+
+        toast(mode == TrackSorter.MODE_TIME
+                ? getString(R.string.msg_sort_time)
+                : getString(R.string.msg_sort_name), Toast.LENGTH_SHORT);
+    }
+
+    /**
+     * 把正在播放的曲目滚到当前列表的可见区域。
+     *
+     * 与「定位到当前歌曲」的区别：这里不弹 toast（排序后自动发生，
+     * 每次都提示会很吵），且找不到时回到列表顶部而不是提示路径。
+     *
+     * 必须 post 到下一帧：setSortMode() 刚触发过 notifyDataSetChanged，
+     * 此时 RecyclerView 的布局还没算完，立刻滚动会落到旧位置。
+     * 用 scrollToPositionWithOffset 而不是 smoothScrollToPosition：
+     * 几百项的列表平滑滚动又慢又常常停不准，需求是「可见」不是「动画」。
+     */
+    private void scrollToPlayingTrack() {
+        if (recyclerView == null) return;
+
+        WebDAVFile current = (musicPlayer != null) ? musicPlayer.getCurrentTrack() : null;
+        List<WebDAVFile> files = (fileListAdapter != null) ? fileListAdapter.getFiles() : null;
+
+        int index = -1;
+        if (current != null && files != null) {
+            for (int i = 0; i < files.size(); i++) {
+                if (MusicPlayer.isSameTrack(files.get(i), current)) {
+                    index = i;
+                    break;
+                }
+            }
+        }
+
+        final int target = index;
+        recyclerView.post(() -> {
+            try {
+                if (target >= 0) {
+                    RecyclerView.LayoutManager lm = recyclerView.getLayoutManager();
+                    if (lm instanceof LinearLayoutManager) {
+                        // 留出上方 1/3 的空间，让用户能看到它前后的条目
+                        ((LinearLayoutManager) lm)
+                                .scrollToPositionWithOffset(target, recyclerView.getHeight() / 3);
+                    } else {
+                        recyclerView.scrollToPosition(target);
+                    }
+                } else {
+                    // 当前曲目不在本目录（用户翻到了别处）：新顺序从头看
+                    recyclerView.scrollToPosition(0);
+                }
+            } catch (Exception e) {
+                if (rlog != null) rlog.w(TAG, "排序后滚动失败: " + e.getMessage());
+            }
+        });
+    }
+
+    // ==================== 新功能②：定位到当前歌曲 ====================
 
     /**
      * 「更多」菜单 → 定位到当前歌曲。
