@@ -9,8 +9,10 @@
         android:id="@+id/lyricsList"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:clipToPadding="false"
+        android:clipToPadding="true"
         android:overScrollMode="never"
+        android:paddingTop="96dp"
+        android:paddingBottom="96dp"
         android:scrollbars="none" />
 
     <!-- 顶部：返回 + 歌名 -->

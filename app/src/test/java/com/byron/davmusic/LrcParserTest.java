@@ -79,6 +79,13 @@ public class LrcParserTest {
     }
 
     @Test
+    public void extractsArtistTag() {
+        assertEquals("王力宏", LrcParser.artist("[ti:爱因为在心中]\n[ar:王力宏]\n[00:01.00]词"));
+        assertEquals("", LrcParser.artist("[00:01.00]没有标签"));
+        assertEquals("", LrcParser.artist(null));
+    }
+
+    @Test
     public void metadataTagsAreIgnored() {
         String lrc = "[ti:歌名]\n[ar:歌手]\n[al:专辑]\n[by:某人]\n[00:01.00]正文";
         List<LrcParser.Line> lines = LrcParser.parse(lrc);

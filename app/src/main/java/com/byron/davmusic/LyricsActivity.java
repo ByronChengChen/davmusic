@@ -147,7 +147,7 @@ public class LyricsActivity extends AppCompatActivity {
         }
 
         trackTitle.setText(track.getDisplayName());
-        trackSubtitle.setText(track.getServerName() == null ? "" : track.getServerName());
+        trackSubtitle.setText("");   // 歌手来自歌词的 [ar:] 标签，加载完再填
 
         final String key = track.getCacheKey();
         if (key.equals(loadedKey) && !lines.isEmpty()) return;   // 同一首，已展示中
@@ -202,6 +202,7 @@ public class LyricsActivity extends AppCompatActivity {
 
     private void applyLyrics(String text, String key) {
         if (!key.equals(loadedKey)) return;
+        trackSubtitle.setText(LrcParser.artist(text));
         lines = LrcParser.parse(text);
         adapter.setLines(lines);
         if (lines.isEmpty()) {
@@ -238,16 +239,32 @@ public class LyricsActivity extends AppCompatActivity {
             lyricsList.post(() -> scrollToLine(index, false));
             return;
         }
+
+        int padTop = lyricsList.getPaddingTop();
+        int padBottom = lyricsList.getPaddingBottom();
+        int usable = height - padTop - padBottom;
         int rowPx = Math.round(ROW_HEIGHT_DP * getResources().getDisplayMetrics().density);
-        int targetTop = (height - rowPx) / 2;
+        // 中线落点：内容区内居中，永远在顶栏下方（clipToPadding 也不会让内容画进 padding）
+        final int targetTop = padTop + Math.max(0, (usable - rowPx) / 2);
 
         View row = layoutManager.findViewByPosition(index);
-        if (smooth && row != null) {
+        if (row != null) {
             int dy = row.getTop() - targetTop;
-            if (Math.abs(dy) > 2) lyricsList.smoothScrollBy(0, dy);
-        } else {
-            layoutManager.scrollToPositionWithOffset(index, targetTop);
+            if (Math.abs(dy) <= 2) return;
+            if (smooth) lyricsList.smoothScrollBy(0, dy);
+            else lyricsList.scrollBy(0, dy);
+            return;
         }
+
+        // 目标行不在屏幕上：先把它贴到内容区顶部（避免停在顶栏下面），
+        // 下一帧按实际 top 精修到中线
+        layoutManager.scrollToPositionWithOffset(index, padTop);
+        lyricsList.post(() -> {
+            View v = layoutManager.findViewByPosition(index);
+            if (v == null) return;
+            int dy = v.getTop() - targetTop;
+            if (Math.abs(dy) > 2) lyricsList.scrollBy(0, dy);
+        });
     }
 
     // ---------------- 网络与缓存 ----------------

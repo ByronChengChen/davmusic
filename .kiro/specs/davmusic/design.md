@@ -451,6 +451,8 @@ signature = hex(HMAC-SHA256(key = 令牌, msg = canonical))
 之间运行。切歌由 `onTrackChanged` 触发重载，请求返回时用「当前 key 是否还是发起时那首」
 丢弃过期结果。
 
+**布局约束**：RecyclerView 上下各 96dp padding + `clipToPadding=true`。顶栏是覆盖层，没有这层 padding 时首行/手动上滑会把歌词停在标题下面（v1.45 修复）。居中目标 = `padTop + (可用高度 - 行高) / 2`；目标行不在屏幕上时先 `scrollToPositionWithOffset(index, padTop)` 贴内容区顶部，下一帧再 `scrollBy` 精修，避免出现「先停在顶栏下」的中间态。
+
 **编码**：BOM → 严格 UTF-8 → GB18030 → 宽松 UTF-8。顺序不能变：GB18030 几乎不会解码
 失败，放在严格 UTF-8 之前会把所有 UTF-8 文件抢走。
 

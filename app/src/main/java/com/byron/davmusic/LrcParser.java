@@ -43,7 +43,17 @@ public final class LrcParser {
     private static final Pattern OFFSET_TAG =
             Pattern.compile("\\[offset:\\s*([+-]?\\d+)\\s*\\]", Pattern.CASE_INSENSITIVE);
 
+    private static final Pattern ARTIST_TAG =
+            Pattern.compile("\\[ar:\\s*([^\\]]*)\\]", Pattern.CASE_INSENSITIVE);
+
     private LrcParser() {
+    }
+
+    /** 取 [ar:歌手] 标签；没有则返回空串（副标题用） */
+    public static String artist(String text) {
+        if (text == null || text.isEmpty()) return "";
+        Matcher m = ARTIST_TAG.matcher(text);
+        return m.find() ? m.group(1).trim() : "";
     }
 
     /**
