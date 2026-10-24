@@ -17,6 +17,7 @@
 > - v1.43：XML 解析抽成 `WebDAVResponseParser`（纯 JVM 可测），单元测试接入 CI（JUnit + Robolectric，
 >   无模拟器），共 18 个类 / 9730 行
 > - v1.44：新增全屏歌词页（`LyricsActivity` / `LrcParser` / `LyricLineAdapter`），共 21 个类 / 10368 行
+> - v1.45：歌词列表加 96dp 上下留白 + `clipToPadding`，修复首行被顶栏遮挡；副标题改用 `[ar:]`
 
 ---
 
@@ -772,6 +773,7 @@ public interface OnPlaybackListener {
 | `ServerProfile` 的 JSON 往返 / `getScopeId` | 纯函数，构造对象 → 序列化 → 反序列化 → 断言字段一致 |
 | `ServerStore.pickActive` 的回退逻辑 | 纯函数（列表 + activeId → 期望 profile），覆盖 id 失效场景 |
 | `LocalCacheManager` 的 JSON 序列化 | 构造 `List<WebDAVFile>` → 序列化 → 反序列化 → 断言字段一致 |
+| `LrcParser` 的解析与编码 | 纯函数：文本 → 行列表；字节 → 文本（编码回退顺序不能错） |
 | `LocalCacheManager.listLocalTree` 的目录重建 | 给定离线索引条目集合 → 断言重建出的树结构 |
 | `NetworkUtils` 的判断逻辑 | 依赖 `Context`，需 Robolectric 或仪器测试 |
 
@@ -832,6 +834,24 @@ public interface OnPlaybackListener {
 | **目录间隔离** | 不同 folderPath 的快照互不影响；删除一个不影响另一个 |
 | **损坏 JSON 降级** | 半截 JSON → `loadSnapshot` 返回 null，不崩溃 |
 | **目录树重建** | 索引含 `/a/b/c.mp3` → `listLocalTree("/a/b")` 能列出 `c.mp3` |
+
+**`LrcParserTest`（JUnit，纯 JVM —— 已实现，20 个用例）**
+
+| 用例 | 说明 |
+|------|------|
+| 基础解析 | `[00:01.00]第一句` → 1000ms + 文本 |
+| 毫秒位数 | `.5` / `.50` / `.500` 都是 500ms |
+| 冒号小数 | `[00:01:23]` → 1230ms（少数生成器格式） |
+| 一行多标签 | `[00:10.00][01:20.00]副歌` → 展开为两条 |
+| offset | 正数提前、负数延后；不得产生负数时间 |
+| 元信息 | `[ti:]/[ar:]/[al:]/[by:]` 不产生歌词行；`artist()` 取 `[ar:]` |
+| 排序 | 文件乱序 → 输出按时间升序 |
+| 空文本行 | 保留（间奏占位） |
+| 非法行 | 跳过，不影响其它行 |
+| 编码 · UTF-8 | 正常解码；去掉 BOM 后首行标签仍可解析 |
+| 编码 · GBK | 中文环境老歌词不得变乱码 |
+| 编码 · UTF-16LE | BOM 识别 |
+| 路径规则 | `歌.mp3 → 歌.lrc`；含点的文件名、无扩展名；空/目录路径返回 null |
 
 **`MusicPlayerTest`（未实现；`nextIndexOf()` 可纯 JVM 测，其余需 ShadowMediaPlayer）**
 
