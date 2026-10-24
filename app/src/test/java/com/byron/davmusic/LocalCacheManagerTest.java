@@ -151,12 +151,21 @@ public class LocalCacheManagerTest {
         files.add(audio("a.mp3", 1));
         cache.saveSnapshot(FOLDER, files);
 
-        File dir = new File(RuntimeEnvironment.getApplication().getFilesDir(), "snapshots");
-        File[] all = dir.listFiles();
-        assertNotNull(all);
-        assertEquals(1, all.length);
+        // 用被测类自己的路径解析，而不是手拼 filesDir/snapshots：
+        // LocalCacheManager 是单例，可能持有更早测试方法的 Application 上下文，
+        // 两者目录不一定相同
+        File snapshotFile;
+        try {
+            java.lang.reflect.Method m =
+                    LocalCacheManager.class.getDeclaredMethod("getSnapshotFile", String.class);
+            m.setAccessible(true);
+            snapshotFile = (File) m.invoke(cache, FOLDER);
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        }
+        assertTrue(snapshotFile.exists());
 
-        try (FileOutputStream fos = new FileOutputStream(all[0])) {
+        try (FileOutputStream fos = new FileOutputStream(snapshotFile)) {
             fos.write("{\"files\":[{\"displayName\":\"半截".getBytes(StandardCharsets.UTF_8));
         } catch (Exception e) {
             throw new AssertionError(e);
