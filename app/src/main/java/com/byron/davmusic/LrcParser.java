@@ -115,6 +115,26 @@ public final class LrcParser {
     }
 
     /**
+     * 返回「时间 <= positionMs」的最后一行下标；还没有任何一行到点则返回 -1。
+     *
+     * 二分查找：长歌词可能上千行，而歌词页每 80ms 就要问一次。
+     */
+    public static int indexAt(List<Line> lines, int positionMs) {
+        if (lines == null || lines.isEmpty()) return -1;
+        int lo = 0, hi = lines.size() - 1, answer = -1;
+        while (lo <= hi) {
+            int mid = (lo + hi) >>> 1;
+            if (lines.get(mid).timeMs <= positionMs) {
+                answer = mid;
+                lo = mid + 1;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        return answer;
+    }
+
+    /**
      * 与歌曲同目录、同名、扩展名换成 .lrc 的路径。
      *
      * v1 只支持这种命名（用户已确认）：`a/b/歌.mp3` → `a/b/歌.lrc`。

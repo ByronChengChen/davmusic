@@ -4,6 +4,9 @@ import android.content.Context;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
+import android.view.GestureDetector;
+import android.view.MotionEvent;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
@@ -11,6 +14,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -55,6 +59,11 @@ public class LyricsActivity extends AppCompatActivity {
     private Button searchButton;
     private boolean searching;
 
+    private PlayerBarController playerBar;
+    private GestureDetector gestureDetector;
+    /** 双击跳转后短暂屏蔽 ticker，避免 seek 尚未生效时高亮被拉回旧行 */
+    private long suppressHighlightUntil;
+
     private List<LrcParser.Line> lines = new ArrayList<>();
     private String loadedKey;
     private boolean ticking;
@@ -65,7 +74,9 @@ public class LyricsActivity extends AppCompatActivity {
         @Override
         public void run() {
             if (!ticking) return;
-            if (player != null) updateHighlight(player.getCurrentPosition());
+            if (player != null && SystemClock.elapsedRealtime() >= suppressHighlightUntil) {
+                updateHighlight(player.getCurrentPosition());
+            }
             handler.postDelayed(this, TICK_MS);
         }
     };
@@ -118,6 +129,8 @@ public class LyricsActivity extends AppCompatActivity {
         lyricsList.setAdapter(adapter);
 
         player.addPlaybackListener(listener);
+        playerBar = new PlayerBarController(this, findViewById(R.id.playerBar), player);
+        setupDoubleTapToSeek();
         loadLyrics();
     }
 
@@ -137,6 +150,7 @@ public class LyricsActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        if (playerBar != null) playerBar.release();
         if (player != null) player.removePlaybackListener(listener);
         handler.removeCallbacksAndMessages(null);
         super.onDestroy();
@@ -232,14 +246,65 @@ public class LyricsActivity extends AppCompatActivity {
 
     private void updateHighlight(int positionMs) {
         if (lines.isEmpty()) return;
-        int index = -1;
-        for (int i = 0; i < lines.size(); i++) {
-            if (lines.get(i).timeMs <= positionMs) index = i;
-            else break;
-        }
+        int index = LrcParser.indexAt(lines, positionMs);
         if (adapter.setCurrentIndex(index) && index >= 0) {
             scrollToLine(index, true);
         }
+    }
+
+    // ---------------- 双击跳转 ----------------
+
+    private void setupDoubleTapToSeek() {
+        gestureDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
+            @Override
+            public boolean onDoubleTap(MotionEvent e) {
+                seekToLyricAt(e.getX(), e.getY());
+                return true;
+            }
+        });
+        lyricsList.addOnItemTouchListener(new RecyclerView.SimpleOnItemTouchListener() {
+            @Override
+            public boolean onInterceptTouchEvent(@NonNull RecyclerView rv, @NonNull MotionEvent e) {
+                gestureDetector.onTouchEvent(e);
+                return false;   // 不拦截：滚动与单击行为不变
+            }
+        });
+    }
+
+    /**
+     * 双击某句 → 把播放位置移到这句的时间点。
+     *
+     * 按用户要求**只定位、不自动播放**：暂停时双击仍是暂停，但进度会移动。
+     * seek 是异步的，所以这里立刻高亮目标行并短暂屏蔽 ticker，避免视觉上先跳回旧行。
+     */
+    private void seekToLyricAt(float x, float y) {
+        if (player == null || lines.isEmpty()) return;
+
+        View child = lyricsList.findChildViewUnder(x, y);
+        if (child == null) return;
+        int position = lyricsList.getChildAdapterPosition(child);
+        if (position < 0 || position >= lines.size()) return;
+
+        long target = lines.get(position).timeMs;
+        if (player.isPreparing()) {
+            toast("正在准备播放，稍后再试");
+            return;
+        }
+        int duration = player.getDuration();
+        if (duration <= 0) {
+            toast("播放器还没准备好");
+            return;
+        }
+        if (target >= duration - 300) {
+            toast("这句超出音频时长");
+            return;
+        }
+
+        player.seekTo((int) target);
+
+        adapter.setCurrentIndex(position);
+        scrollToLine(position, false);
+        suppressHighlightUntil = SystemClock.elapsedRealtime() + 1000;
     }
 
     private void scrollToLine(final int index, boolean smooth) {

@@ -19,6 +19,7 @@
 > - v1.44：新增全屏歌词页（`LyricsActivity` / `LrcParser` / `LyricLineAdapter`），共 21 个类 / 10368 行
 > - v1.45：歌词列表加 96dp 上下留白 + `clipToPadding`，修复首行被顶栏遮挡；副标题改用 `[ar:]`
 > - v1.46：歌词搜索（LRCLIB）+ 选中后上传同名 `.lrc`（不覆盖已有文件），共 23 个类 / 10789 行
+> - v1.47：抽出 `view_player_bar` 供两处复用 + 歌词页播放控制条与双击定位，共 24 个类 / 11050 行
 
 ---
 
@@ -444,6 +445,7 @@ signature = hex(HMAC-SHA256(key = 令牌, msg = canonical))
 | `LyricsActivity` | 全屏页面：加载歌词、80ms 轮询 `getCurrentPosition()`、行号变化时滚动居中 |
 | `LrcParser` | 纯逻辑：LRC 解析 + 编码回退 + 同名 `.lrc` 路径推导（纯 JVM 可测） |
 | `LyricLineAdapter` | 只负责「哪一行高亮」；滚动由 Activity 控制 |
+| `PlayerBarController` | 播放控制条绑定：进度拖动、播放/暂停、切歌、模式；拖动中抑制自动刷新 |
 | `WebDAVClient.fetchBytes` | 单次 GET 到内存：不落盘、不计数、不重试；404/403 由调用方当「无歌词」 |
 
 **数据获取**：列表过滤掉了歌词条目（R3.5），所以不知道文件是否存在。做法是按同名规则
@@ -471,6 +473,15 @@ signature = hex(HMAC-SHA256(key = 令牌, msg = canonical))
 时长差排序。选中后先写本地缓存并显示，再 `putBytes` 上传到同目录同名 `.lrc`；
 上传用 `If-None-Match: *`，服务器已有同名文件返回 412 → 提示未覆盖。
 单次请求、429 即停，符合 AGENTS.md 的网络克制。
+
+**播放控制条（v1.47）**：把主界面的迷你播放器整块抽成 `view_player_bar.xml`，两处 `<include>`
+同一份布局（控件 id 一致），主界面因此不需要改代码。歌词页的绑定逻辑放在
+`PlayerBarController`：拖动进度条期间屏蔽 `onProgress` 回写、松手才 `seekTo`。
+
+**双击定位（v1.47）**：`GestureDetector` 挂在 RecyclerView 的 `onInterceptTouchEvent`
+（返回 false，不影响滚动），`findChildViewUnder` 取行号 → `LrcParser.indexAt` 同一套二分
+定位当前行。按用户要求**只 seek 不播放**；seek 异步，故立即高亮目标行并屏蔽 ticker 约 1 秒。
+越界 / 未 prepare 时提示，不静默失败。
 
 ---
 

@@ -86,6 +86,20 @@ public class LrcParserTest {
     }
 
     @Test
+    public void indexAtReturnsLastLineNotAfterPosition() {
+        // 歌词页每 80ms 调用一次，边界必须是「<=」而不是严格小于
+        List<LrcParser.Line> lines = LrcParser.parse("[00:01.00]a\n[00:05.00]b\n[00:10.00]c");
+
+        assertEquals(-1, LrcParser.indexAt(lines, 500));       // 前奏：还没到第一句
+        assertEquals(0, LrcParser.indexAt(lines, 1000));       // 正好第一句
+        assertEquals(0, LrcParser.indexAt(lines, 4999));
+        assertEquals(1, LrcParser.indexAt(lines, 5000));
+        assertEquals(2, LrcParser.indexAt(lines, 999999));     // 超出最后一句
+        assertEquals(-1, LrcParser.indexAt(new java.util.ArrayList<>(), 1000));
+        assertEquals(-1, LrcParser.indexAt(null, 1000));
+    }
+
+    @Test
     public void metadataTagsAreIgnored() {
         String lrc = "[ti:歌名]\n[ar:歌手]\n[al:专辑]\n[by:某人]\n[00:01.00]正文";
         List<LrcParser.Line> lines = LrcParser.parse(lrc);

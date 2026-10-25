@@ -109,137 +109,15 @@
         
     </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
     
-    <!-- 迷你播放器 -->
-    <LinearLayout
+    <!-- 迷你播放器：与歌词页共用 view_player_bar.xml，控件 id 不变。
+         visibility 由 MainActivity 按是否有播放曲目控制。 -->
+    <include
         android:id="@+id/miniPlayerLayout"
+        layout="@layout/view_player_bar"
         android:layout_width="match_parent"
         android:layout_height="78dp"
-        android:orientation="horizontal"
-        android:background="@color/player_background"
-        android:padding="8dp"
-        android:visibility="gone"
-        android:elevation="4dp">
-        
-        <!-- 播放信息 -->
-        <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:paddingTop="2dp"
-            android:paddingBottom="2dp">
-            
-            <TextView
-                android:id="@+id/playerTitleTextView"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/label_no_track"
-                android:textSize="14sp"
-                android:textColor="@color/text_primary"
-                android:ellipsize="end"
-                android:maxLines="1" />
-            
-            <SeekBar
-                android:id="@+id/playerProgressBar"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
-                android:maxHeight="3dp"
-                android:minHeight="3dp"
-                android:progressDrawable="@drawable/player_progress"
-                android:thumbTint="@color/player_progress_foreground"
-                android:paddingStart="0dp"
-                android:paddingEnd="0dp" />
+        android:visibility="gone" />
 
-            <!-- 播放时间：当前进度 / 总时长 -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginTop="1dp">
-
-                <TextView
-                    android:id="@+id/playerCurrentTimeText"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/time_zero"
-                    android:textSize="11sp"
-                    android:textColor="@color/text_secondary" />
-
-                <View
-                    android:layout_width="0dp"
-                    android:layout_height="0dp"
-                    android:layout_weight="1" />
-
-                <TextView
-                    android:id="@+id/playerTotalTimeText"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/time_zero"
-                    android:textSize="11sp"
-                    android:textColor="@color/text_secondary" />
-            </LinearLayout>
-
-        </LinearLayout>
-        
-        <!-- 播放控制按钮 -->
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="match_parent"
-            android:orientation="horizontal"
-            android:gravity="center">
-            
-            <!-- 播放模式：点击循环切换 顺序 / 列表循环 / 单曲循环 / 随机。
-                 图标随当前模式变化（见 MainActivity.refreshPlayModeButton） -->
-            <ImageButton
-                android:id="@+id/playModeButton"
-                android:layout_width="36dp"
-                android:layout_height="36dp"
-                android:src="@drawable/ic_repeat"
-                android:contentDescription="@string/btn_play_mode"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:scaleType="center"
-                android:padding="6dp" />
-            
-            <!-- 上一首 -->
-            <ImageButton
-                android:id="@+id/previousButton"
-                android:layout_width="36dp"
-                android:layout_height="36dp"
-                android:src="@drawable/ic_previous"
-                android:contentDescription="@string/btn_previous"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:scaleType="center"
-                android:padding="6dp" />
-            
-            <!-- 播放/暂停 -->
-            <ImageButton
-                android:id="@+id/playPauseButton"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:layout_marginStart="8dp"
-                android:layout_marginEnd="8dp"
-                android:src="@drawable/ic_play"
-                android:contentDescription="@string/btn_play"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:scaleType="center"
-                android:padding="8dp" />
-            
-            <!-- 下一首 -->
-            <ImageButton
-                android:id="@+id/nextButton"
-                android:layout_width="36dp"
-                android:layout_height="36dp"
-                android:src="@drawable/ic_next"
-                android:contentDescription="@string/btn_next"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:scaleType="center"
-                android:padding="6dp" />
-            
-        </LinearLayout>
-        
-    </LinearLayout>
-    
     <!-- 上传按钮 -->
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/fabUpload"
