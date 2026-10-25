@@ -206,6 +206,26 @@ public class MusicService extends Service
                 }
 
                 /**
+                 * 媒体控制中心 / 锁屏上拖动进度条。
+                 *
+                 * 只把 ACTION_SEEK_TO 写进 actions 是不够的：系统把拖动结果通过这个回调
+                 * 下发，而 Callback 基类的实现是空的。不覆盖它，用户拖完什么都不会发生，
+                 * 下一秒 progressTick 又用旧 position 回写 —— 表现就是「进度条拖不动」。
+                 */
+                @Override
+                public void onSeekTo(long pos) {
+                    int duration = player.getDuration();
+                    int target = duration > 0
+                            ? (int) Math.max(0, Math.min(pos, duration))
+                            : (int) Math.max(0, pos);
+                    rlog.i(TAG, "媒体按键: onSeekTo " + pos + " -> " + target);
+                    player.seekTo(target);
+                    // seek 是异步的：立刻回写会读到旧位置，稍后再同步一次
+                    progressHandler.removeCallbacks(syncPlaybackState);
+                    progressHandler.postDelayed(syncPlaybackState, 400);
+                }
+
+                /**
                  * 原始按键兜底。
                  *
                  * 三击在不同耳机上可能上报为 KEYCODE_MEDIA_PREVIOUS，
@@ -356,6 +376,14 @@ public class MusicService extends Service
 
     private final android.os.Handler progressHandler =
             new android.os.Handler(android.os.Looper.getMainLooper());
+
+    /** seek 之后把真实位置回写给系统（MediaPlayer.seekTo 是异步的） */
+    private final Runnable syncPlaybackState = new Runnable() {
+        @Override
+        public void run() {
+            updateMediaSessionState();
+        }
+    };
 
     private final Runnable progressTick = new Runnable() {
         @Override
