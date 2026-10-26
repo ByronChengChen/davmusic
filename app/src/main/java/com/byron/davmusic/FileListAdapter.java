@@ -205,7 +205,7 @@ public class FileListAdapter extends RecyclerView.Adapter<FileListAdapter.ViewHo
             holder.fileNameTextView.setText(file.getDisplayName());
             holder.fileSizeTextView.setText("");
             holder.fileDurationTextView.setText("");
-            holder.fileNameTextView.setTextColor(context.getResources().getColor(android.R.color.black));
+            holder.fileNameTextView.setTextColor(context.getResources().getColor(R.color.text_primary));
             
             // 点击事件
             holder.itemView.setOnClickListener(v -> {
@@ -248,7 +248,7 @@ public class FileListAdapter extends RecyclerView.Adapter<FileListAdapter.ViewHo
                         nameColor = context.getResources().getColor(R.color.download_state_downloaded);
                         break;
                     default:
-                        nameColor = context.getResources().getColor(android.R.color.black);
+                        nameColor = context.getResources().getColor(R.color.text_primary);
                         break;
                 }
             }
