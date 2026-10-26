@@ -354,7 +354,7 @@ public class LyricsActivity extends AppCompatActivity {
         input.setText(LyricsQuery.fromFileName(track.getDisplayName()));
         input.setSelection(input.getText().length());
 
-        new android.app.AlertDialog.Builder(this)
+        new androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle(R.string.lyrics_search_title)
                 .setView(content)
                 .setPositiveButton(R.string.lyrics_search_action,
@@ -400,7 +400,7 @@ public class LyricsActivity extends AppCompatActivity {
         String[] items = new String[results.size()];
         for (int i = 0; i < results.size(); i++) items[i] = results.get(i).displayLine();
 
-        new android.app.AlertDialog.Builder(this)
+        new androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle(R.string.lyrics_search_pick)
                 .setItems(items, (d, which) -> applySearchResult(results.get(which)))
                 .setNegativeButton(android.R.string.cancel, null)

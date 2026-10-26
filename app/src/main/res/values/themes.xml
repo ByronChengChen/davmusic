@@ -13,6 +13,12 @@
         <item name="colorSecondaryVariant">@color/secondary_variant</item>
         <item name="colorOnSecondary">@color/on_secondary</item>
         
+        <!-- 表面色：Material 组件（对话框、菜单、卡片）跟随它 -->
+        <item name="colorSurface">@color/surface</item>
+        <item name="colorOnSurface">@color/on_surface</item>
+        <item name="colorOnBackground">@color/on_background</item>
+        <item name="colorError">@color/error</item>
+
         <!-- 背景色 -->
         <item name="android:statusBarColor">?attr/colorPrimaryVariant</item>
         <item name="android:navigationBarColor">@color/navigation_bar_color</item>
@@ -57,7 +63,7 @@
     
     <!-- 对话框主题 -->
     <style name="Theme.DavMusic.Dialog" parent="Theme.MaterialComponents.DayNight.Dialog">
-        <item name="android:windowBackground">@color/background</item>
+        <item name="android:windowBackground">@color/surface</item>
     </style>
     
     <!-- 按钮样式 -->

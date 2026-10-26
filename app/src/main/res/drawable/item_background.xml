@@ -10,6 +10,6 @@
   适配器通过 itemView.setActivated(true) 来点亮高亮，无需换 background。
 -->
 <ripple xmlns:android="http://schemas.android.com/apk/res/android"
-    android:color="#33000000">
+    android:color="@color/ripple">
     <item android:drawable="@drawable/item_bg_selector" />
 </ripple>

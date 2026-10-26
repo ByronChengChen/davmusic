@@ -45,6 +45,7 @@
     
     <!-- 界面元素颜色 -->
     <color name="divider">#1F000000</color>
+    <color name="ripple">#33000000</color>
     <color name="card_background">#FFFFFF</color>
     <color name="card_shadow">#1F000000</color>
     
