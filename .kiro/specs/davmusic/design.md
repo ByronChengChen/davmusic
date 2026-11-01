@@ -18,8 +18,13 @@
 >   无模拟器），共 18 个类 / 9730 行
 > - v1.44：新增全屏歌词页（`LyricsActivity` / `LrcParser` / `LyricLineAdapter`），共 21 个类 / 10368 行
 > - v1.45：歌词列表加 96dp 上下留白 + `clipToPadding`，修复首行被顶栏遮挡；副标题改用 `[ar:]`
-> - v1.46：歌词搜索（LRCLIB）+ 选中后上传同名 `.lrc`（不覆盖已有文件），共 23 个类 / 10789 行
-> - v1.47：抽出 `view_player_bar` 供两处复用 + 歌词页播放控制条与双击定位，共 24 个类 / 11050 行
+> - v1.46：歌词搜索（LRCLIB）+ 选中后条件上传同名 `.lrc`，修复 Callback 名称冲突后共 23 个 Java 源文件 / 10791 行
+> - v1.47：抽出 `view_player_bar` 供两处复用 + 歌词页播放控制条与双击定位，共 24 个 Java 源文件 / 11053 行
+> - v1.48：补齐系统媒体会话 `onSeekTo`，共 24 个 Java 源文件 / 11081 行
+> - v1.49–v1.50：夜间色板、主题/图标适配与列表文字色修复
+> - 2026-11-01：按 v1.50（`fba3714`，versionCode 150）核对实现；纠正客户端工厂、缓存归属、根列表适配器、歌词布局/双击、线程与测试覆盖描述，标注尚存实现偏差。
+>
+> **当前规模口径**：`app/src/main/java/**/*.java` 的 24 个源文件（按文件数，不含内部类、测试、生成代码），逐文件 `splitlines()` 物理行数合计 **11081 行**（含空行/注释）；`MainActivity.java` **3049 行**。历史版本规模仅作为当时记录，v1.46/v1.47 已按相同口径复核。
 
 ---
 
@@ -31,23 +36,27 @@
 ┌──────────────────────────────────────────────────────────────┐
 │  UI 层                                                        │
 │  ├─ ServerConfigActivity    单台服务器配置（首次启动入口）      │
-│  ├─ ServerManageActivity    多服务器管理（列表/增删改/设活动）  │
+│  ├─ ServerManageActivity    多服务器管理（列表/增删改/进入）    │
 │  ├─ MainActivity            根层级 + 文件夹浏览 + 迷你播放器    │
 │  ├─ FileListAdapter         文件列表适配器（文件/文件夹两态）  │
-│  └─ ServerListAdapter       服务器列表适配器                   │
+│  ├─ ServerListAdapter       服务器管理页列表适配器             │
+│  ├─ LyricsActivity / LyricLineAdapter  全屏歌词与高亮行          │
+│  └─ PlayerBarController     歌词页播放条绑定（主界面仍自行绑定） │
 ├──────────────────────────────────────────────────────────────┤
 │  业务层                                                        │
 │  ├─ WebDAVClient            按服务器实例化的协议客户端           │
-│  ├─ MusicPlayer             播放控制 + 播放列表 + 单一播放线程  │
+│  ├─ MusicPlayer             播放控制 + 播放列表 + 主线程回调    │
 │  ├─ MusicService            前台服务 + MediaSession + 通知栏     │
-│  ├─ LocalCacheManager       下载缓存 + 快照 + 离线索引（按作用域）│
+│  ├─ LocalCacheManager       下载缓存 + 快照 + 遗留离线索引       │
+│  ├─ LrcParser / LyricsQuery / LyricsSearchClient  歌词解析与搜索  │
+│  ├─ WebDAVResponseParser    PROPFIND XML 解析                   │
 │  ├─ ServerStore             服务器配置读写与活动服务器解析        │
 │  ├─ RemoteLogger            远程日志上报（真机诊断）             │
 │  ├─ TrackSorter             列表/队列共用的排序比较器（v1.42）    │
 │  └─ HttpDateParser          getlastmodified 解析（RFC/ISO，v1.42）│
 ├──────────────────────────────────────────────────────────────┤
 │  数据层                                                        │
-│  ├─ OkHttp                 网络传输（每服务器一个 client 实例）  │
+│  ├─ OkHttp                 WebDAV 实例共享传输客户端            │
 │  ├─ MediaPlayer            音频解码播放                        │
 │  ├─ SharedPreferences      服务器列表 JSON + 活动 id + 下载映射  │
 │  └─ 本地文件系统            快照 JSON + 音频文件 + 日志缓冲      │
@@ -93,14 +102,14 @@
 
 | 要点 | 做法 |
 |------|------|
-| 实例化 | **不再是全局单例**。每台服务器一个客户端实例（`clientFor(ServerProfile)`），凭据随实例绑定，避免多服务器互相覆盖 |
-| 认证 | 实例持有该服务器的 Base64 Basic Auth 头，每次请求附带 |
+| 实例化 | `WebDAVClient.forServer(ServerProfile)` 按需创建轻量实例；`clientFor(ServerProfile)` 是 MainActivity 的私有包装，不是 WebDAVClient 的方法；底层 `sharedHttpClient` 共享 |
+| 认证 | 实例持有该服务器的 URL/用户名/密码，请求时生成 Basic Auth 头 |
 | 自定义方法 | OkHttp 的 `Request.Builder.method("PROPFIND", body)` 发起 Depth:1 请求 |
 | 超时 | connect 15s / read 60s（对应 N1） |
-| 线程 | 所有网络调用为异步（`enqueue`） |
-| 取消 | 返回 `Call` 对象支持取消（上传/下载中断） |
+| 线程 | 常规请求用 `enqueue`；上传错误状态的大小复核通过 `listFolderSync` 在后台同步请求 |
+| 取消 | 公开请求方法返回 `void`，不暴露 `Call`；上传界面的取消只清待上传队列，不能中断在途请求 |
 | 请求节流 | 遇 429 仅提示，不做自动失败计数与退避（N7，参见 v1.24 决策） |
-| 内存缓存 | 对短期重复请求做内存级缓存以降低请求量（N8，参见 v1.23 决策） |
+| 内存缓存 | 位于 **MainActivity** 的 `dirCache` / `dirCacheTime`，TTL 5 分钟；不是 WebDAVClient 或 LocalCacheManager 内部能力（N8） |
 
 **PROPFIND 请求体**（要求服务器返回所需属性）：
 
@@ -108,6 +117,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <D:propfind xmlns:D="DAV:">
   <D:prop>
+    <D:displayname/>
     <D:getcontentlength/>
     <D:getlastmodified/>
     <D:getcontenttype/>
@@ -130,6 +140,8 @@
 | `listFolder(path, callback)` | PROPFIND 列目录 |
 | `download(remote, dest, progressCb)` | 下载到本地（带进度） |
 | `upload(local, remote, progressCb)` | PUT 上传（带进度） |
+| `fetchBytes(remotePath, callback)` | 单次 GET 小文件到内存，歌词页自行缓存 |
+| `putBytes(remotePath, data, contentType, callback)` | 条件 PUT 歌词，带 `If-None-Match: *` |
 | `createFolder(remotePath, cb)` | **MKCOL 新建文件夹**（v1.38，R11.1–R11.4） |
 | `deleteRemote(remotePath, isCollection, cb)` | **DELETE 删除远端文件/目录**（v1.36，R11.5–R11.6） |
 | `getDownloadUrl(remotePath)` | 拼出可 GET 的完整 URL（含编码） |
@@ -174,13 +186,13 @@ public class ServerProfile {
 | 写入 | `add()`（补 id 后写入）/ `update()` / `setActive()` / `remove()` |
 | **回退策略** | `pickActive()`：优先按 `active_server_id` 匹配；**匹配不到则退回列表第一台** —— 服务器可能被删而 id 仍指向它，或 JSON 被外部改坏。绝不允许出现"有服务器却选不出活动服务器"导致跳回配置页 |
 | 别名去重 | `isAliasTaken(alias, self)` 阻止重名保存（R1.9） |
-| 作用域 | `getScopeId()` 供 `LocalCacheManager` 区分"同一远端路径属于哪台服务器"（R1.10） |
+| 作用域 | `getScopeId()` 是遗留 URL/用户名派生标识；当前下载/在线快照键由条目的 `serverId` 或 MainActivity 的 `cacheKeyOf(server, path)` 显式构造（R1.10） |
 
-**为什么需要作用域**：两台服务器都可能有 `/music/周杰伦/`，若缓存键只用路径，会互相串扰（A 的快照被 B 读到、下载映射撞车）。作用域把缓存键变成 `scopeId + path`。
+**为什么需要归属键**：两台服务器都可能有 `/music/周杰伦/`，若缓存键只用路径，会互相串扰。当前键使用 `serverId + ":" + path`；遗留离线读写仍有未统一的路径键，见 2.3。
 
 ### 2.3 LocalCacheManager（本地状态层）
 
-**职责**：管理三类本地数据 —— **已下载文件**、**文件夹快照**、**离线索引**，全部按服务器作用域隔离。
+**职责**：管理三类本地数据 —— **已下载文件**、**文件夹快照**、**离线索引**。下载与在线快照通过调用方传入的 serverId 键隔离；遗留离线索引尚未统一，不能宣称全部隔离。
 
 **设计要点**：
 
@@ -189,29 +201,31 @@ public class ServerProfile {
 | 项 | 做法 |
 |----|------|
 | 位置 | `context.getExternalFilesDir("music")`（对应 R4.7 / N6） |
-| 命名 | 用远程路径避免非法字符与重名冲突 |
+| 命名 | `SHA-256(cacheKey)` 的前 16 位十六进制 + 原扩展名；外部私有目录不可用时回退 `filesDir/music` |
 | 映射 | 远程路径 → 本地路径的映射持久化到 SharedPreferences |
 
 **② 文件夹快照**（对应 R6.1–R6.6）
 
 - 用户每次成功列出某文件夹后，把 `List<WebDAVFile>` 序列化为 JSON 写入本地文件
 - 快照键由**作用域 + 文件夹路径**派生
-- 序列化字段：`href`、`displayName`、`contentLength`、`contentType`、`lastModified`、`etag`、`isCollection`
-- **不序列化** `downloadState` / `localPath` —— 本地状态读取时**实时**查询（否则会出现"快照说已下载、实际文件已被删"的不一致）
+- 目录为 `filesDir/snapshots`；序列化字段：`href`、`relativePath`、`serverId`、`serverName`、`displayName`、`contentLength`、`contentType`、`lastModified`、`etag`、`isCollection`、`downloadState`、`localPath`
+- `downloadState` / `localPath` **实际会入快照**；MainActivity 展示前用 `updateFileDownloadStates()` 按 `getCacheKey()` 查询磁盘与映射，覆盖恢复出的本地状态
 
 **③ 离线索引与本地文件树**（对应 R6.7–R6.8）
 
 - 下载成功时 `indexOfflineFile()` 记录远程路径、显示名、大小
 - `listLocalTree(path)` 把已下载文件**按远程路径归组**重建出目录树，供离线时浏览
-- `removeDownloadedFile()` 删除本地文件时同步 `removeOfflineIndex()`，保持索引与磁盘一致
+- `removeDownloadedFile()` 仅删除映射及本地文件，**没有调用** `removeOfflineIndex()`；目录重建/计数会跳过不存在的本地文件，但索引条目可能残留
 - `getOfflineFileCount()` 供"关于"页展示离线文件数
+
+⚠️ **当前代码偏差，未在本次文档审校中修代码**：MainActivity 下载映射按 `file.getCacheKey()` 写入，但 `indexOfflineFile()` 仍按 `file.getHref()` 写入；`showLocalDownloads()` 仍用裸 `requestPath` 读快照，`listLocalTree()` 用索引裸路径查映射，而在线快照按 `cacheKeyOf(server, path)` 保存。行内本地删除也仍以 `href` 查映射。因此多服务器离线回退、计数和本地删除不能据接口存在就视作已完整实现；`clearAllCache()` 亦未清空 offline_index。
 
 **关键方法**：
 
 | 方法 | 说明 |
 |------|------|
 | `getInstance(Context)` | 单例 |
-| `getLocalFile(String remotePath)` | 返回本地文件或 null |
+| `getLocalFile(String remotePath)` | 返回映射的 File 或 null（不保证文件仍存在，需 `isDownloaded`/exists 核验）；当前下载映射参数应传 cacheKey |
 | `isDownloaded(String remotePath)` | 是否已下载 |
 | `getDownloadDestination(String)` | 计算下载目标路径 |
 | `markFileDownloaded(String, File)` | 记录下载完成 |
@@ -232,10 +246,10 @@ public class ServerProfile {
 
 | 要点 | 做法 |
 |------|------|
-| **单一播放线程** | 消息队列串行处理所有播放器操作，杜绝多线程并发访问造成状态错乱（R9.7） |
+| **线程模型** | 当前为主 Looper 的 Handler + 主线程 Activity/Service 调用，并无独立播放线程或所有公开方法统一入队机制；`prepareAsync` 异步准备（R9.7 的独立线程描述不等于已实现） |
 | **在线播放** | `setDataSource(Context, Uri, Map<String,String> headers)` —— headers 携带 `Authorization`（R5.2） |
 | **本地播放** | 直接 `setDataSource(filePath)`，无网络请求（R6.3） |
-| 进度更新 | 定时回调当前位置（服务侧 1s 与通知同频，UI 侧 500ms） |
+| 进度更新 | MusicPlayer 的 Handler 每 1 秒发送 `onProgress`；MusicService 播放中另每 1 秒刷新媒体会话；歌词高亮另用 80ms 轮询 |
 | 播放列表 | 持有 `List<WebDAVFile>` 与当前索引，支持上一首/下一首 |
 | **播放模式** | 顺序播放 / 列表循环（默认）/ 单曲循环 / 随机播放；见下方「播放模式设计」（R5.11–R5.14） |
 | **重排队列** | `reorderPlaylist(comparator)` 只重写列表顺序、当前索引与预加载目标，**不碰 MediaPlayer**（R13.5–R13.6） |
@@ -253,6 +267,7 @@ public class ServerProfile {
 | 媒体会话 | 使用 **androidx 的 `MediaSessionCompat`**，而非平台版 `MediaSession`。原因：`androidx.media.app.NotificationCompat.MediaStyle` 要求 `MediaSessionCompat.Token`，与平台版 Token 类型不兼容 |
 | 按键映射 | `Callback.onPlay/onPause/onSkipToNext/onSkipToPrevious`；耳机单击=播放暂停、双击=下一首、三击=上一首（由系统/耳机固件转换为 MediaSession 回调） |
 | **进度同步** | `PlaybackState.position` 是**静态快照**，只在状态变化时更新会导致系统进度条停住。因此每秒周期性刷新 `updateMediaSessionState()` |
+| **系统 seek（v1.48）** | actions 声明 `ACTION_SEEK_TO` 并实现 `Callback.onSeekTo(long)`；已知 duration 时夹到 `[0, duration]`，未知时仅保留下界 0，交 `player.seekTo()`；取消旧 `syncPlaybackState` 并延迟 400ms 回写真实位置，不自动播放 |
 | 播完续播 | `onCompletion` → 下一首，锁屏/后台状态下同样成立（R9.6） |
 | 释放 | `stopSelf()` 结束服务 |
 
@@ -260,7 +275,7 @@ public class ServerProfile {
 
 ```
 playFile(WebDAVFile file):
-    if LocalCacheManager.isDownloaded(file.href):
+    if LocalCacheManager.isDownloaded(file.getCacheKey()):
         → 播放本地文件路径
     else:
         → 播放 getDownloadUrl(file.href)，携带 Authorization 头
@@ -308,7 +323,7 @@ playFile(WebDAVFile file):
 **职责**：把关键路径的日志上报到远端，用于真机定位难以复现的问题（尤其是锁屏/后台播放，无法连 IDE 看 logcat）（N9 / R12）。
 
 - 提供 `i` / `w` / `e` 级别方法，带 TAG
-- 日志写入本地缓冲并批量上报，避免频繁网络请求
+- 日志逐条落本地文件并轮转；用户主动 `upload()` 时批量 PUT，独立单线程执行上传，并非周期自动上报
 - 典型用途：定位"锁屏后台切歌失败"、"预加载被自己销毁"等仅在真机长时运行下出现的问题
 - **上报成功即精确清理该份内容**，避免下次重复上传（v1.34，R12.6）
 
@@ -354,12 +369,11 @@ signature = hex(HMAC-SHA256(key = 令牌, msg = canonical))
 
 **ServerManageActivity**
 
-- 服务器列表（`ServerListAdapter`）：展示别名 / 主机 / 活动标记
-- 支持新增、编辑、删除、设为活动（R1.5）
-- 删除时同步清理该作用域下的缓存与快照
-- 可通过 `EXTRA_ENTER_SERVER_ID` 直接进入指定服务器
+- 服务器管理列表（`ServerListAdapter`）：展示别名 / 主机，支持新增、编辑、删除；点击条目由 `onSwitch()` **回传进入目标 id**，不是设置全局活动服务器
+- 删除仅 `ServerStore.remove()` 配置；**未同步清理**该服务器的本地下载与快照。MainActivity 回前台发现正在浏览的服务器已删时退回根层级
+- `EXTRA_ENTER_SERVER_ID` 是管理页结果 Intent 的 extra，MainActivity 的 Activity Result 回调读出后调用 `enterServer()`
 
-**MainActivity**（3045 行，最大的类，v1.42）
+**MainActivity**（3049 行，当前最大的 Java 源文件，v1.50）
 
 | 区域 | 内容 |
 |------|------|
@@ -373,24 +387,24 @@ signature = hex(HMAC-SHA256(key = 令牌, msg = canonical))
 
 - `onBackPressed()`：**三层回退** —— 服务器内非根目录 → 上跳一级文件夹；服务器根目录 → 返回服务器列表；服务器列表 → 交给系统退出（R2.4）
 - `currentServer` 为 null 时即处于服务器列表根层级（R2.0）
-- 点击文件夹 → 更新路径 → `loadFolder()`；点击音频 → `MusicPlayer.playFile()`（R2.3 / R5.1）
-- 下载按钮 → 子线程下载 + `runOnUiThread` 更新进度（R4.1 / R4.2 / N2）
+- 点击文件夹 → 更新路径 → `loadCurrentPath()`；点击音频 → `MusicPlayer.playFile()`（R2.3 / R5.1）
+- 下载按钮 → OkHttp 回调线程写文件，mainHandler 更新完成/失败状态；当前进度百分比只写日志（R4.1 / R4.2 / N2）
 - **请求期服务器快照**：请求发出时用 `final ServerProfile serverAtRequest = currentServer` 固化，
   回调里用该实例算 cacheKey；否则用户请求途中切服务器会把 A 的结果写进 B 的作用域（R2.10）
-- `loadFolder()` 的降级链：**网络请求 → 失败则读快照 → 再退到本地离线索引 → 都无则提示**（R6.2 / R6.5 / R6.8）
-- `locateCurrentTrack()`：由当前播放曲目的路径推出所在目录并跳转、滚动定位（R10）
+- `loadCurrentPath()`：在线时**5 分钟内存缓存零请求 → 过期缓存先显示再静默刷新 → 未命中时磁盘快照先显示再请求**；网络失败且已有内容时保留缓存，无内容且离线计数大于 0 才尝试 `showLocalDownloads()`（其键偏差见 2.3）
+- `locateCurrentTrack()`：仅在当前可见列表内查找并滚动；未命中只提示完整路径，不跨目录跳转（R10）
 - 滚动位置需按目录保存/恢复，否则"离线返回后目录看似消失"（v1.20 真因）
 
 **FileListAdapter**
 
-- 两种 viewType：文件夹 / 文件
+- 一个 `item_file.xml` / ViewHolder，`onBindViewHolder()` 按 `isCollection()` 区分文件夹/文件状态，未覆盖 `getItemViewType()`
 - **可见性过滤集中在 `setFiles()`：只保留文件夹与音频**，图片/歌词/文档/系统文件一律丢弃
   （适配器内保留图片与歌词的图标分支，但被过滤挡住、不可达；见 requirements R3.5）
 - 音频条目右侧三态 UI：下载按钮（未下载）· 进度条（下载中）· 删除按钮（已下载，**只删本地**）
 - **左滑删除作用于远端**（`ItemTouchHelper` + 条目背后红底「删除」）：
   行内已经承载下载状态与进度条，再加按钮会放大误触；删除是破坏性操作，用左滑手势而非按钮
   （v1.36，R11.5）
-- **已下载条目文字色 `#4CAF50`（绿色），未下载用默认色**（R4.3 / R4.4）
+- **文字色使用资源**：播放中优先 `item_playing_text`；否则 DOWNLOADED / DOWNLOADING 用 `download_state_downloaded`（浅色 `#4CAF50`、夜间 `#81C784`）；普通文件及文件夹用 `text_primary`，不硬编码黑色（v1.50）
 - 提供 `updateDownloadState(href, state)` 做局部刷新，避免整表重绘
 - **ViewHolder 复用需重置全部状态**，否则出现列表渲染错乱（v1.21 真因）
 
@@ -457,7 +471,7 @@ signature = hex(HMAC-SHA256(key = 令牌, msg = canonical))
 之间运行。切歌由 `onTrackChanged` 触发重载，请求返回时用「当前 key 是否还是发起时那首」
 丢弃过期结果。
 
-**布局约束**：RecyclerView 上下各 96dp padding + `clipToPadding=true`。顶栏是覆盖层，没有这层 padding 时首行/手动上滑会把歌词停在标题下面（v1.45 修复）。居中目标 = `padTop + (可用高度 - 行高) / 2`；目标行不在屏幕上时先 `scrollToPositionWithOffset(index, padTop)` 贴内容区顶部，下一帧再 `scrollBy` 精修，避免出现「先停在顶栏下」的中间态。
+**布局约束**：v1.45 曾为上下各 96dp；v1.47 改为 RecyclerView **上 72dp / 下 48dp** padding + `clipToPadding=true`，下方另有固定 **78dp** 播放条。顶栏仍为覆盖层。居中目标 = `padTop + max(0, (可用高度 - 72dp 行高) / 2)`；目标行不在屏幕上时先 `scrollToPositionWithOffset(index, padTop)`，下一帧再 `scrollBy` 精修。
 
 **编码**：BOM → 严格 UTF-8 → GB18030 → 宽松 UTF-8。顺序不能变：GB18030 几乎不会解码
 失败，放在严格 UTF-8 之前会把所有 UTF-8 文件抢走。
@@ -469,19 +483,25 @@ signature = hex(HMAC-SHA256(key = 令牌, msg = canonical))
 允许客户端调用，且中文曲库实测可用；⛔ 不要换成网易云/QQ 音乐的非官方接口。
 `LyricsQuery.fromFileName` 只做保守规范化（去扩展名、去 `10 `/`第10首` 前缀），
 **不拆「歌手 - 歌名」**：拆错比不拆更糟，用户在弹窗里能自己改关键词。
-结果只保留 `syncedLyrics` 非空的条目（纯文本塞进滚动页会让人以为坏了），按与当前曲目
+搜索按钮仅在无歌词或加载失败状态显示（已有可用歌词时状态容器隐藏），无当前曲目时不提供搜索。
+请求携带 User-Agent / Accept，独立 OkHttpClient connect 10s / read 15s；结果排除纯音乐与 `syncedLyrics` 空白条目，按与当前曲目
 时长差排序。选中后先写本地缓存并显示，再 `putBytes` 上传到同目录同名 `.lrc`；
-上传用 `If-None-Match: *`，服务器已有同名文件返回 412 → 提示未覆盖。
+上传用 `If-None-Match: *`，遵守该条件的服务器已有同名文件返回 412 → 提示未覆盖；上传失败不撤销本地缓存。**部分 WebDAV 驱动可能忽略条件头，不能保证服务端绝不覆盖**；入口也未强制先得到 404（403/其它加载错误亦能进入搜索）。搜索请求回调没有曲目 key 校验，选中时作用于当时的 `loadedKey` / 当前曲目，搜索期间切歌仍是待修风险。
 单次请求、429 即停，符合 AGENTS.md 的网络克制。
 
 **播放控制条（v1.47）**：把主界面的迷你播放器整块抽成 `view_player_bar.xml`，两处 `<include>`
-同一份布局（控件 id 一致），主界面因此不需要改代码。歌词页的绑定逻辑放在
-`PlayerBarController`：拖动进度条期间屏蔽 `onProgress` 回写、松手才 `seekTo`。
+同一份布局（内部控件 id 一致；主页面 include id 为 `miniPlayerLayout`，歌词页为 `playerBar`）。**仅共享布局，不共用绑定控制器**：MainActivity 沿用自身监听与绑定；歌词页的绑定逻辑放在
+`PlayerBarController`：拖动进度条期间屏蔽 `onProgress` 回写、松手调用 `seekTo`；构造时注册播放监听并刷新，歌词页 `onDestroy()` 调 `release()` 移除监听，避免持有已销毁 Activity。
 
 **双击定位（v1.47）**：`GestureDetector` 挂在 RecyclerView 的 `onInterceptTouchEvent`
-（返回 false，不影响滚动），`findChildViewUnder` 取行号 → `LrcParser.indexAt` 同一套二分
-定位当前行。按用户要求**只 seek 不播放**；seek 异步，故立即高亮目标行并屏蔽 ticker 约 1 秒。
-越界 / 未 prepare 时提示，不静默失败。
+（返回 false，不影响滚动），`findChildViewUnder` + `getChildAdapterPosition` 找被双击的行，取该行 `timeMs`，**不是调用 `LrcParser.indexAt()`**（后者用于 ticker 按播放进度找当前行）。按用户要求**只 seek 不播放**；立即高亮/居中目标行并屏蔽 ticker 1000ms。准备中、duration ≤ 0、目标 ≥ duration − 300ms 会提示；未命中行或 adapter 下标无效则直接返回。
+
+### 2.10 系统深色模式（v1.49–v1.50）
+
+- `Theme.DavMusic` 继承 `Theme.MaterialComponents.DayNight.DarkActionBar`，`Theme.DavMusic.NoActionBar` 继承它并显式关闭 ActionBar。随系统夜间配置选择 `values/colors.xml` / `values-night/colors.xml`；没有 App 内手动主题切换项。
+- 夜间背景 `#121212`、表面 `#1E1E1E`、播放条 `#1A1A1A`、正文 `#E6FFFFFF`，播放行背景 `#16283D`；主题补 `colorSurface` / `colorOnSurface` / `colorOnBackground` / `colorError`，对话框 windowBackground 使用 surface。
+- 16 个普通矢量图标改用 `@color/icon_normal`，列表 ripple 使用 `@color/ripple`。MainActivity 与歌词搜索弹窗使用 AppCompat AlertDialog，配合已有服务器页面弹窗跟随 DayNight；不把全部平台对话框都视为已替换（MainActivity 仍使用平台 ProgressDialog）。
+- v1.50 修复 FileListAdapter 两处绕过主题的 `android.R.color.black`，文件夹名与普通文件名改用 `R.color.text_primary`；播放态优先色与下载态绿色继续保留。
 
 ---
 
@@ -491,15 +511,18 @@ signature = hex(HMAC-SHA256(key = 令牌, msg = canonical))
 
 ```java
 public class WebDAVFile {
-    private String href;            // 服务器路径（唯一标识）
+    private String href;            // 原始 href，跨服务器不唯一
+    private String relativePath;    // 解码、剥 basePath 后的相对路径
+    private String serverId;        // 条目归属与缓存隔离
+    private String serverName;      // 来源别名
     private String displayName;     // 显示名称
     private long contentLength;     // 字节数
     private String contentType;     // MIME
     private long lastModified;      // 时间戳
     private String etag;            // 版本标识（用于快照更新判定）
     private boolean isCollection;   // true = 文件夹
-    private DownloadState downloadState;  // 本地状态（不入快照）
-    private String localPath;       // 本地路径（不入快照）
+    private DownloadState downloadState;  // 入快照，展示前重查
+    private String localPath;       // 入快照，展示前重查
 
     public enum DownloadState {
         NOT_DOWNLOADED, DOWNLOADING, DOWNLOADED
@@ -507,7 +530,7 @@ public class WebDAVFile {
 }
 ```
 
-**设计说明**：`downloadState` 与 `localPath` 是**运行时字段**，不写入快照 JSON。快照记录的是服务器端的客观事实（文件存在、大小、etag）；本地状态通过 `LocalCacheManager.isDownloaded(href)` 实时查询。这样快照不会因本地文件被删除而失真。
+**设计说明**：`downloadState` 与 `localPath` 实际会写入快照，MainActivity 渲染前通过 `updateFileDownloadStates()` 按 `file.getCacheKey()` 重新核验本地状态。`getCacheKey()` 为 `serverId + ":" + relativePath`；无 serverId 的旧条目回退 relativePath。
 
 ### 3.2 服务器配置（持久化模型）
 
@@ -524,18 +547,21 @@ ServerProfile (JSON)
   └─ password
 ```
 
-**作用域键（scopeId）**：由 `ServerProfile.getScopeId()` 派生，作为 `LocalCacheManager` 中所有缓存键的前缀：
+**当前归属键**：条目下载/歌词用 `WebDAVFile.getCacheKey()`，目录内存缓存/在线快照用 MainActivity 的 `cacheKeyOf(server, path)`：
 
 ```
-cacheKey = scopeId + "::" + remotePath
+trackCacheKey = serverId + ":" + relativePath
+folderCacheKey = serverId + ":" + requestPath  // 空路径先转为 "/"
 ```
 
 **设计含义**：同一远端路径在不同服务器下必然得到不同的 cacheKey，因此：
 - 快照不会被跨服务器误读（A 的 `/music/` 不会覆盖 B 的 `/music/`）
 - 下载映射不会撞车（两台服务器都有 `/a.mp3` 时各存各的）
-- 删除服务器时可据 scopeId 精确清理其全部本地数据
+- 删除服务器目前仅删除配置，未按 serverId 清理本地数据；离线裸路径键偏差见 2.3
 
-**与初版的差异**：初版把单台服务器的 url/user/password 直接存成三个独立 key（`server_url` 等），无 id、无别名、无作用域概念，多服务器场景下会全面串扰。当前保留这些旧 key 仅为兼容历史配置的读取。
+`ServerProfile.getScopeId()` 仍保留：URL（trim/小写）+ `|` + 用户名（trim）做 SHA-256，取前 12 位十六进制，不含密码；它不是上述当前键的前缀。
+
+**旧键兼容**：`server_url` / `username` / `password` / `is_configured` 不仅用于迁移读取，`ServerStore.save()` 仍将遗留活动配置镜像写回；当前浏览/播放不靠该指针切换来源。
 
 ### 3.3 播放列表
 
@@ -556,24 +582,24 @@ cacheKey = scopeId + "::" + remotePath
 应用启动
   → ServerStore.list() 有服务器？
       ├─ 无 → ServerConfigActivity 强制配置（R1.1）
-      └─ 有 → ServerStore.getActive()（匹配 active_server_id，失败则回退第一台，R1.8）
+      └─ 有 → 首台配置初始化遗留兼容客户端字段（不等于全局活动服务器）
               → MainActivity 进入根层级：currentServer = null
-                  → 列表显示全部服务器（ServerListAdapter）
+                  → showServerRoot() 构造虚拟 WebDAVFile 文件夹，交 FileListAdapter
                   → 用户点击某台 → currentServer = 该 profile
-                                    → 以其 WebDAV 根为当前路径 → loadFolder()
+                                    → enterServer() → 以其 WebDAV 根为当前路径 → loadCurrentPath()
 ```
 
 ### 4.1 浏览文件夹（在线）
 
 ```
 用户点击文件夹
-  → MainActivity.loadFolder(path)
+  → MainActivity.loadCurrentPath()（currentPath 已更新）
   → final ServerProfile serverAtRequest = currentServer   ← 固化，防请求途中切换（R2.10）
   → final String cacheKey = cacheKeyOf(serverAtRequest, path)   ← 作用域隔离
   → WebDAVClient.listFolder(path, callback)
   → PROPFIND Depth:1 → 解析 XML → List<WebDAVFile>
   → 过滤系统文件 + 按类型分组排序
-  → LocalCacheManager.saveSnapshot(path, files)   ← 落快照（带作用域）
+  → LocalCacheManager.saveSnapshot(cacheKey, files)   ← 落快照（带 serverId）
   → LocalCacheManager.isDownloaded() 标注每个条目的下载状态
   → FileListAdapter.setFiles(files) → 渲染（已下载显示绿色）
 ```
@@ -582,7 +608,7 @@ cacheKey = scopeId + "::" + remotePath
 
 ```
 用户点击文件夹
-  → MainActivity.loadFolder(path)
+  → MainActivity.loadCurrentPath()
   → NetworkUtils.isNetworkConnected() == false
   → 降级链：
       ① LocalCacheManager.loadSnapshot(path)   ← 曾在线访问过
@@ -593,10 +619,12 @@ cacheKey = scopeId + "::" + remotePath
 ### 4.2.1 网络恢复（对应 R6.10）
 
 ```
-NetworkUtils 回调检测到由离线 → 在线
-  → 自动重新 loadFolder(当前路径)
+MainActivity.onResume() 检测到此前离线、现在联网
+  → refreshOfflineFlag() 复位 → loadCurrentPath()
   → 用服务器结果覆盖快照与列表（从本地视图切回在线视图）
 ```
+
+没有 NetworkUtils 的实时网络回调；每次加载前也会复位离线标志。在线缓存优先次序见 2.6，离线键偏差见 2.3。
 
 ### 4.3 下载音乐（对应 R4）
 
@@ -604,12 +632,12 @@ NetworkUtils 回调检测到由离线 → 在线
 用户点击下载按钮
   → 条目状态置 DOWNLOADING，显示进度条
   → WebDAVClient.download(remotePath, destFile, progressCallback)
-  → 进度回调 → runOnUiThread → 更新进度条（R4.2）
-  → 完成 → LocalCacheManager.markFileDownloaded(href, file)
+  → 进度回调 → MainActivity 仅打印百分比日志（进度控件未按百分比更新，R4.2 未完整实现）
+  → 完成 → LocalCacheManager.markFileDownloaded(file.getCacheKey(), destFile)
           → 持久化映射到 SharedPreferences（R4.5）
           → LocalCacheManager.indexOfflineFile(...)   ← 写离线索引（R6.7）
           → adapter.updateDownloadState(href, DOWNLOADED) → 文字变绿（R4.3）
-  → 失败 → 清理临时文件 + Toast 提示（R4.8）
+  → 失败 → 状态回退 + Toast；直接写 destFile，未删除半成品（R4.8 未完整实现）
 ```
 
 ### 4.4 播放与后台保活（对应 R5.1、R9）
@@ -618,12 +646,12 @@ NetworkUtils 回调检测到由离线 → 在线
 用户点击音频条目
   → MusicService 启动（startForegroundService）+ 创建媒体通知与 MediaSession（R9.1–R9.3）
   → MusicPlayer.setPlaylist(当前文件夹的音频列表, 点击项索引)
-  → MusicPlayer.playFile(file)   ← 在单一播放线程串行执行（R9.7）
-      → LocalCacheManager.isDownloaded(file.href)?
+  → MusicPlayer.playFile(file)   ← 由主线程调用，非独立播放线程（见 2.4）
+      → LocalCacheManager.isDownloaded(file.getCacheKey())?
           是 → setDataSource(本地文件路径)         ← 无网络请求
           否 → setDataSource(uri, headers={Authorization})  ← 流式播放
   → onTrackChanged / onPlayStateChanged → MainActivity 更新迷你播放器
-  → 定时进度回调（UI 500ms / 通知 1s） → 更新进度条与时长显示
+  → MusicPlayer 定时进度回调（1s） → 更新进度条与时长显示
   → updateMediaSessionState() 每秒刷新 → 系统媒体控制中心进度条持续走动（R9.5）
 
 曲目播完
@@ -643,18 +671,19 @@ NetworkUtils 回调检测到由离线 → 在线
   → 单曲循环下当前曲目在 native 层无缝重播，循环点不产生新的取流请求（R5.12）
 
 用户从通知栏/锁屏/蓝牙耳机操作
-  → MediaSessionCompat.Callback（onPlay / onPause / onSkipToNext / onSkipToPrevious）
+  → MediaSessionCompat.Callback（onPlay / onPause / onSkipToNext / onSkipToPrevious / onSeekTo）
   → MusicPlayer 对应动作（主动切歌优先于播放模式，见 R5.14）
+  → 系统 seek 后延迟 400ms 同步 PlaybackState（v1.48）
 ```
 
 ### 4.5 上传（对应 R7）
 
 ```
 用户点击上传按钮 → 系统文件选择器 → 选中文件
-  → FileUtils.isAudioFile()? 否 → 拒绝（R8.1）
-  → 是 → WebDAVClient.upload(localFile, 当前目录 + 文件名, progressCallback)
+  → SAF 可多选任意文件（*/*）或选择音频（audio/*），不强制扩展名校验（R8.1）
+  → 复制到私有临时缓存，串行 WebDAVClient.upload(localFile, 当前目录 + 文件名, progressCallback)
   → 进度回调 → 更新 UI（R7.3）
-  → 成功 → 重新 loadFolder() 刷新列表（R7.4）
+  → 成功 → 使目录缓存失效并重新 loadCurrentPath() 刷新列表（R7.4）
   → 失败 → Toast 提示（R7.5）
 ```
 
@@ -663,20 +692,21 @@ NetworkUtils 回调检测到由离线 → 在线
 ```
 用户在"更多"菜单选择"定位到当前歌曲"
   → 取当前播放曲目（无则提示，R10.2）
-  → 由曲目远程路径推出所在目录
-  → 必要时先回到该曲目所属服务器
-  → 加载该目录并滚动到该条目、高亮（R10.3）
+  → 在当前可见列表按 MusicPlayer.isSameTrack 查找
+  → 命中：平滑滚动到条目，沿用播放高亮（R10.3）
+  → 未命中：Toast 显示服务器别名与完整路径，不加载其它目录
 ```
 
-### 4.7 切换服务器（对应 R1.7、R1.10）
+### 4.7 进入另一台服务器（对应 R1.7、R1.10）
 
 ```
-用户在某台服务器内选择"切换服务器"
-  → ServerStore.setActive(newId)
-  → MainActivity 重置路径栈与 currentServer
-  → 以新服务器的作用域重新 loadFolder()
+用户从服务器根列表点击另一台，或从管理页点击条目回传 EXTRA_ENTER_SERVER_ID
+  → MainActivity.enterServer(profile)，更新 currentServer 与目录栈
+  → loadCurrentPath() 按目标服务器请求，使用 serverId 缓存键
   → 旧服务器的快照/下载映射保持独立，不受影响
 ```
+
+浏览不需要 `ServerStore.setActive()`，不清播放队列或全部缓存；active_server_id 仅属遗留持久化兼容。
 
 ### 4.8 改变排序方式（对应 R13）
 
@@ -727,11 +757,12 @@ public interface OnPlaybackListener {
 | 操作 | 线程 | UI 更新方式 |
 |------|------|------------|
 | 网络请求 | OkHttp 异步回调线程 | 调用方用 `runOnUiThread` |
-| 文件下载 | ExecutorService 子线程 | 进度回调内 `runOnUiThread` |
+| 文件下载 | ExecutorService 发起，OkHttp 回调线程写文件 | 成功/失败 mainHandler.post；进度当前仅日志 |
+| 歌词搜索/字节 GET/PUT | OkHttp 回调线程（校验失败可同步回调） | LyricsActivity 用 runOnUiThread；普通 upload 的进度另已切主线程 |
 | MediaPlayer 操作 | 主线程 | 直接更新 |
 | 进度轮询 | Handler（主线程） | 直接更新 |
 
-**原则**（N2）：任何可能阻塞的操作都不在主线程执行；任何 View 操作都不在子线程执行。
+**目标原则**（N2）：阻塞操作应后台化，View 操作应在主线程。但当前歌词缓存读写、部分快照读取仍在 UI 路径同步执行，MediaPlayer.setDataSource 也由主线程调用，不能宣称所有 I/O 已后台化。
 
 ---
 
@@ -740,17 +771,17 @@ public interface OnPlaybackListener {
 | 场景 | 处理策略 | 需求 |
 |------|---------|------|
 | 网络不可用 | 降级链：快照 → 本地离线索引 → 提示 | R6.2 / R6.5 / R6.8 |
-| 认证失败（401） | 提示检查用户名密码，引导回该服务器的配置页 | R1.4 |
-| 目录不存在（404） | 提示"文件夹不存在"，返回上级 | R2.8 |
+| 认证失败（401） | 连接测试反馈失败；目录加载走通用错误/缓存回退，未自动跳配置页 | R1.4 |
+| 目录不存在（404） | 通用 HTTP 错误/缓存回退，未专门返回上级 | R2.8 |
 | 服务器错误（5xx） | 显示状态码 + 可读提示 | R2.8 |
 | **限流（429）** | **仅 Toast 提示，不自动重试**（避免失败计数与退避和服务器限制自锁，见 v1.24 决策） | N7 |
-| XML 解析失败 | 跳过该条目，不中断整个列表 | R2.8 |
-| 下载中断 | 删除不完整临时文件，状态回退为未下载 | R4.8 |
+| XML 解析失败 | DOM 语法错误使整次请求失败；缺 href 跳过条目，坏大小忽略，坏日期置 0；合法 XML 无 response 返回空列表 | R2.8 |
+| 下载中断 | 状态回退并提示，未清理半成品 destFile | R4.8 |
 | 上传失败 | Toast 提示，不影响其他功能 | R7.5 |
 | **新建文件夹失败** | 按状态码提示：`401`/`403`/`429` 与删除同源；`405` 同名已存在或服务端不支持；`409` 父目录不存在；`415` 不接受请求体（v1.38） | R11.4 |
 | **远端删除失败** | 按 `401` / `403` / `429` 给出可排障提示（v1.36） | R11.6 |
 | **写操作被重定向** | 校验 `response.request().method()` 仍是 `MKCOL`/`DELETE`，避免把 GET 的 2xx 当成写成功 | R11.2 / R11.5 |
-| 播放失败（格式不支持/网络断） | `onError` 回调 → 提示并跳过到下一首 | R5.7 |
+| 播放失败（格式不支持/网络断） | `onError` 回调 → 提示与日志，未自动跳过下一首 | R5.7 |
 | **切歌过程中的中间态错误** | **抑制误报**，不弹错误提示（v1.26 修复） | R5.10 |
 | 缓冲态 | 保持稳定不崩溃，缓冲结束继续播放 | R5.9 |
 | 超时 | connect 15s / read 60s，超时按网络错误处理 | N1 |
@@ -765,18 +796,18 @@ public interface OnPlaybackListener {
 
 | 风险 | 影响 | 缓解 |
 |------|------|------|
-| WebDAV 服务器实现差异 | PROPFIND 响应结构不一 | 兼容大小写命名空间；解析失败时跳过单条而非整体失败 |
+| WebDAV 服务器实现差异 | PROPFIND 响应结构不一 | namespace-aware DOM 按 DAV: URI 匹配任意前缀；坏 XML 整次失败；合法 XML 无 response 返回空列表，存在误写空快照风险 |
 | 在线流式播放需 `Authorization` 头 | 若服务器重定向到 CDN，headers 可能丢失 | 已实测目标服务器支持 Range 与 302 回源，需真机验证 |
 | MediaPlayer 对流式的缓冲 | 弱网下可能卡顿 | 提示用户下载后离线播放（这也是产品设计的核心动机） |
 | 快照与真实内容不一致 | 离线看到已删除的文件 | 快照带 `lastModified`；在线时以服务器结果为准并覆盖快照；并补离线索引以兜底 |
-| **多服务器缓存串扰** | A 服务器的快照/下载被 B 读到 | **scopeId 作用域前缀**；请求期固化 `serverAtRequest`（R1.10 / R2.10） |
+| **多服务器缓存串扰** | A 服务器的快照/下载被 B 读到 | 下载/在线快照用 **serverId 前缀**，请求期固化 `serverAtRequest`；遗留离线路径键仍有缺口，见 2.3（R1.10 / R2.10） |
 | **Android 后台限制** | 切后台/锁屏播放被系统杀死 | **已实现前台服务 + 媒体通知**（v 前台服务提交）；配合 `WAKE_LOCK` |
 | **锁屏/后台事件难以复现调试** | 无法连 IDE 看 logcat | **RemoteLogger 远程日志上报**，从真机回收日志定位根因 |
 | **`startForeground` 超时** | 服务启动 5 秒内未调用会 ANR/崩溃 | `onCreate` 中立即调用 `startForegroundCompat()` |
-| **MediaSession 类型不兼容** | 平台版 Token 无法用于 androidx MediaStyle | 统一使用 `androidx.media.session.MediaSessionCompat` |
+| **MediaSession 类型不兼容** | 平台版 Token 无法用于 androidx MediaStyle | androidx.media 依赖实际提供 `android.support.v4.media.session.MediaSessionCompat`，不是不存在的 androidx.media.session 包 |
 | **系统媒体进度条不动** | `PlaybackState.position` 是静态快照 | 每秒周期性 `updateMediaSessionState()`（R9.5） |
 | 大量文件时列表卡顿 | 目录含数百音频 | RecyclerView 复用 + 局部刷新（`updateDownloadState`）而非整表重绘 |
-| 离线索引与磁盘不一致 | 索引里有但文件已删 | `removeDownloadedFile()` 同步清理索引；`getCacheSize()`/`getOfflineFileCount()` 供核对 |
+| 离线索引与磁盘/映射不一致 | serverId 与 href 键混用使已下载曲目无法离线列举；删除后索引残留 | 已知偏差见 2.3；`removeDownloadedFile()` 未调用 `removeOfflineIndex()`，不应视为已缓解 |
 | **CI 构建环境变更** | `sdkmanager` 移除 `tools` 包导致 SDK 安装失败 | 工作流已适配（不再安装 `tools`）；见 tasks.md 任务 10 |
 | **切模式撞上"曲目刚结束"的竞态** | 在 native 层已切换、而 `onCompletion` 尚未派发的极窄窗口内切模式：此时 `setNextMediaPlayer(null)` 已撤不回那次切换，被记为"待回收"的实例可能在下一个安全点被释放，表现为新曲目短暂中断后重新开始 | 窗口为毫秒级，且**状态最终一致**（不会错播曲目、不会崩）；单曲循环另有 `setLooping` 兜底。已列入真机验证项 |
 
@@ -794,7 +825,7 @@ public interface OnPlaybackListener {
 | `FileUtils` 的大小/时长格式化 | 纯函数，覆盖边界值（0、负数、超大值） |
 | `WebDAVClient` 的 XML 解析 | 已抽成 `WebDAVResponseParser`，用样例 XML 断言结果（纯 JVM） |
 | `ServerProfile` 的 JSON 往返 / `getScopeId` | 纯函数，构造对象 → 序列化 → 反序列化 → 断言字段一致 |
-| `ServerStore.pickActive` 的回退逻辑 | 纯函数（列表 + activeId → 期望 profile），覆盖 id 失效场景 |
+| `ServerStore.pickActive` 的回退逻辑 | 私有纯逻辑，可经 getActive + Robolectric 间接测；失效 activeId 的直接分支尚无现有用例 |
 | `LocalCacheManager` 的 JSON 序列化 | 构造 `List<WebDAVFile>` → 序列化 → 反序列化 → 断言字段一致 |
 | `LrcParser` 的解析与编码 | 纯函数：文本 → 行列表；字节 → 文本（编码回退顺序不能错） |
 | `LocalCacheManager.listLocalTree` 的目录重建 | 给定离线索引条目集合 → 断言重建出的树结构 |
@@ -817,7 +848,7 @@ public interface OnPlaybackListener {
 | 提取扩展名 | `"a.b.mp3"` | `"mp3"` |
 | 去扩展名 | `"01 黄色月亮.m4a"` | `"01 黄色月亮"` |
 
-**`WebDAVResponseParserTest`（JUnit，纯 JVM —— 已实现，13 个用例）**
+**`WebDAVResponseParserTest`（JUnit，纯 JVM —— 已实现，13 个用例；下表区分已有断言与待补样例）**
 
 | 用例 | 说明 |
 |------|------|
@@ -827,10 +858,10 @@ public interface OnPlaybackListener {
 | 跳过自身条目 | 响应首条通常是目录本身 → 应被过滤 |
 | 过滤 `.DS_Store` | macOS 元数据文件 → 不出现在结果中 |
 | 过滤 `._` 前缀 | `._.DS_Store` → 被过滤 |
-| 空目录 | 仅含自身条目 → 返回空列表 |
-| 命名空间变体 | 服务器用 `d:` 小写前缀 → 仍能正确解析 |
+| 空目录（待补独立样例） | 仅含自身条目 → 返回空列表；现有 dropsTheDirectoryItself 为含文件的混合响应 |
+| 命名空间变体（待补） | 前缀按 URI 解析，但现有 fixture 均用 D:，没有小写/无前缀专门断言 |
 
-**`ServerProfileTest` / `ServerStoreTest`（JUnit；JSON 与 scopeId 为纯 JVM，清单持久化用 Robolectric —— 已实现，12 个用例）**
+**`ServerStoreTest`（Robolectric —— 已实现，12 个用例；包括 ServerProfile JSON/scopeId，仓库没有独立 ServerProfileTest）**
 
 | 用例 | 说明 |
 |------|------|
@@ -839,7 +870,7 @@ public interface OnPlaybackListener {
 | scopeId 区分性 | 两台不同 url 的服务器 → scopeId 不同 |
 | 展示名回落 | 无别名时 `getDisplayName()` 回落到 host |
 | 活动服务器匹配 | activeId 命中 → 返回该台 |
-| **活动服务器回退** | activeId 指向已删除的 id → 返回列表第一台（R1.8） |
+| 删除活动服务器 | remove() 将指针转到首台；未直接覆盖「存储中 activeId 已失效」的 pickActive 分支（R1.8） |
 | 空列表 | 无服务器 → `getActive()` 返回 null |
 | 别名重复检测 | 与其它服务器同名 → `isAliasTaken` 返回 true |
 
@@ -849,16 +880,15 @@ public interface OnPlaybackListener {
 |------|------|
 | 快照存取往返 | `saveSnapshot` → `loadSnapshot` 字段一致 |
 | 快照字段保真 | 序列化**包含** `downloadState` / `localPath`（v1.29 起为恢复后的状态一致而保留）；仓库实现与旧设计不同，以本条为准 |
-| 下载标记持久化 | `markFileDownloaded` 后 `isDownloaded` 返回 true |
-| 删除后状态清除 | `removeDownloadedFile` 后 `isDownloaded` 返回 false |
-| 删除后索引同步 | `removeDownloadedFile` 后离线索引中不再含该条目 |
-| 不存在路径查询 | `getLocalFile("不存在")` 返回 null |
+| 快照缺失 | `loadSnapshot` 返回 null |
+| 空目录快照 | 空列表持久化，区别于无快照 |
+| 删除快照 | `deleteSnapshot` 后读回 null |
 | 快照覆盖更新 | 重复 `saveSnapshot` 同路径 → 内容被覆盖而非追加 |
 | **目录间隔离** | 不同 folderPath 的快照互不影响；删除一个不影响另一个 |
 | **损坏 JSON 降级** | 半截 JSON → `loadSnapshot` 返回 null，不崩溃 |
-| **目录树重建** | 索引含 `/a/b/c.mp3` → `listLocalTree("/a/b")` 能列出 `c.mp3` |
+下载映射、文件删除、离线索引同步与目录树重建尚无该测试类的用例；方法存在不等于已测。
 
-**`LrcParserTest`（JUnit，纯 JVM —— 已实现，20 个用例）**
+**`LrcParserTest`（JUnit，纯 JVM —— 已实现，21 个用例）**
 
 | 用例 | 说明 |
 |------|------|
@@ -869,6 +899,7 @@ public interface OnPlaybackListener {
 | offset | 正数提前、负数延后；不得产生负数时间 |
 | 元信息 | `[ti:]/[ar:]/[al:]/[by:]` 不产生歌词行；`artist()` 取 `[ar:]` |
 | 排序 | 文件乱序 → 输出按时间升序 |
+| 当前行查找 | `indexAt` 返回不晚于播放位置的最后一行，覆盖前奏与尾部 |
 | 空文本行 | 保留（间奏占位） |
 | 非法行 | 跳过，不影响其它行 |
 | 编码 · UTF-8 | 正常解码；去掉 BOM 后首行标签仍可解析 |
@@ -932,6 +963,8 @@ public interface OnPlaybackListener {
 |------|------|
 | 无网络检测 | 模拟断网 → `isNetworkConnected()` 返回 false |
 | 网络状态字符串 | 离线 → 返回可读的离线描述（供 UI 显示） |
+
+另外已有 `TrackSorterTest` **11** 个与 `HttpDateParserTest` **10** 个用例：自然序/文件夹置顶/未知时间下沉/确定性兜底，以及 RFC/ISO 时间解析、无效值与尾随垃圾。当前 `app/src/test/**/*.java` 共 **9 个测试源文件 / 97 个 `@Test`**（静态清点，不代表本次执行测试）。
 
 ### 8.3 不在当前版本覆盖的部分
 

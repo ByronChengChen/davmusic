@@ -17,7 +17,10 @@
 > 任务 26 覆盖 v1.42 排序方式与真实时间解析。
 > 任务 27 覆盖 v1.44–v1.45 全屏歌词页（动态滚动）；任务 28 覆盖 v1.46 歌词搜索与上传；
 > 任务 29 覆盖 v1.47 歌词页播放控制条与双击定位。
-> 本清单已与代码 **v1.47（24 个类 / 11050 行）** 对齐。
+> 任务 30 覆盖 v1.48 系统媒体控制中心 seek；任务 31 覆盖 v1.49–v1.50 深色模式与列表文字修复。
+> 2026-11-01 修订：核对 `fba3714`（versionCode 150 / versionName 1.50），补齐任务 30–31、
+> 总览/依赖/状态摘要，纠正封面与列表可见性、活动服务器、快照字段、缓存位置及测试数量的旧描述。
+> 本清单已与代码 **v1.50（24 个生产 Java 文件 / 11081 物理行）** 对齐；用户已持续实机使用并确认 v1.50 正常。
 
 ---
 
@@ -30,19 +33,19 @@
 | 3 | 数据模型与工具类 | `[x]` | R3.1, R3.5 | `WebDAVFile`, `FileUtils`, `NetworkUtils` |
 | 4 | 文件夹浏览 UI | `[x]` | R2.2–R2.8 | `MainActivity`, `FileListAdapter` |
 | 5 | 音乐文件识别与列表展示 | `[x]` | R3.2–R3.4 | `FileListAdapter`, `item_file.xml` |
-| 6 | 下载管理系统 | `[x]` | R4.1–R4.8 | 下载逻辑 + `LocalCacheManager` |
+| 6 | 下载管理系统 | `[-]` | R4.1–R4.8 | 下载可用；实时百分比及失败残留清理未实现 |
 | 7 | 播放器核心功能 | `[x]` | R5.1–R5.7 | `MusicPlayer` + 迷你播放器 |
-| 8 | 离线快照机制 | `[x]` | R6.1–R6.6 | `LocalCacheManager` 快照部分 |
+| 8 | 离线快照机制 | `[-]` | R6.1–R6.6 | 快照存取可用；离线读取键未统一 |
 | 9 | 上传功能 | `[x]` | R7.1–R7.5, R8.1 | `WebDAVClient.upload` + 上传入口 |
 | 10 | 构建流水线与产物验证 | `[x]` | — | `.github/workflows/build.yml` |
-| 11 | 单元测试补充 | `[ ]` | 见 `design.md` §8 | 待新增 |
+| 11 | 单元测试补充 | `[-]` | 见 `design.md` §8 | 9 个测试类 / 97 个用例，仍待补播放器与网络测试 |
 | **12** | **播放器前台服务与媒体控制** | `[x]` | R9.1–R9.8 | `MusicService` |
-| **13** | **多服务器管理** | `[x]` | R1.5, R1.7–R1.10 | `ServerStore`, `ServerProfile`, `ServerManageActivity`, `ServerListAdapter` |
+| **13** | **多服务器管理** | `[-]` | R1.5, R1.7–R1.10 | 管理已实现；旧称删除服务器自动清缓存未实现 |
 | **14** | **服务器列表即根目录（三层导航）** | `[x]` | R2.0, R2.4, R2.4.1 | `MainActivity` |
-| **15** | **本地离线索引与目录树重建** | `[x]` | R6.7–R6.9 | `LocalCacheManager` 索引部分 |
-| **16** | **定位到当前歌曲** | `[x]` | R10.1–R10.3 | `MainActivity.locateCurrentTrack()` |
+| **15** | **本地离线索引与目录树重建** | `[-]` | R6.7–R6.9 | 索引与下载映射键不一致，删除同步未接通 |
+| **16** | **定位到当前歌曲** | `[-]` | R10.1–R10.3 | 当前列表内滚动已实现；跨目录跳转未实现 |
 | **17** | **远程日志上报** | `[x]` | N9 | `RemoteLogger` |
-| **18** | **请求节流与内存缓存** | `[x]` | N7, N8 | `WebDAVClient` |
+| **18** | **请求节流与内存缓存** | `[x]` | N7, N8 | `MainActivity` 目录内存缓存与 429 提示 |
 | **19** | **固定签名（可覆盖安装保留数据）** | `[x]` | — | `app/build.gradle` keystore 配置 |
 | **20** | **播放健壮性修复（缓冲/切歌/续播）** | `[x]` | R5.9, R5.10, R9.6 | `MusicPlayer`, `MusicService` |
 | **21** | **列表与离线渲染修复** | `[x]` | R2.5, R6.10 | `MainActivity`, `FileListAdapter` |
@@ -54,11 +57,14 @@
 | **27** | **全屏歌词页（动态滚动）** | `[x]` | R14.1–R14.8 | `LyricsActivity`, `LrcParser`, `LyricLineAdapter`, `WebDAVClient.fetchBytes`, `MainActivity` |
 | **28** | **歌词搜索（LRCLIB）与上传** | `[x]` | R14.9–R14.11 | `LyricsSearchClient`, `LyricsQuery`, `WebDAVClient.putBytes`, `LyricsActivity` |
 | **29** | **歌词页播放控制条 + 双击定位** | `[x]` | R14.12–R14.13 | `view_player_bar`, `PlayerBarController`, `LrcParser.indexAt`, `LyricsActivity` |
+| **30** | **系统媒体控制中心进度拖动（v1.48）** | `[x]` | R9.9 | `MusicService.onSeekTo` / `syncPlaybackState` |
+| **31** | **系统深色模式与列表文字修复（v1.49–v1.50）** | `[x]` | R15.1–R15.4 | `values-night/colors.xml`, 主题/图标, `FileListAdapter` |
 
 > **说明**：任务 1–9 由 Kiro 执行 agent 一次完成（9 个 Java 文件 / 2783 行）。
 > 任务 12–21 是后续在真机验证中迭代出来的实际工作，原 spec 未记录，本次补入。
-> 任务 11（单元测试）已部分完成：v1.43 接入 CI，62 个用例覆盖纯逻辑与
-> Context 相关类；`MusicPlayerTest` / `NetworkUtilsTest` 仍待补。
+> 任务 11（单元测试）已部分完成：v1.43 接入 CI，初始 6 类 / 62 例；截至 v1.50，
+> 源码共有 9 类 / 97 个 `@Test`（含后续歌词测试）；`MusicPlayerTest` / `NetworkUtilsTest` 仍待补。
+> 本次只做文档与源码核对，未重跑云端 CI；真机状态来自用户持续使用确认，不冒充本次测试执行。
 
 ---
 
@@ -71,17 +77,17 @@
 - [x] `gradle.properties` 含 `android.useAndroidX=true`（避免 AGP 8 构建失败）
 - [x] Gradle Wrapper（`gradlew` / `gradlew.bat` / `gradle-wrapper.jar` / `.properties`）
 - [x] 引入 OkHttp 4.12.0（唯一第三方网络库）
-- [x] `ServerConfigActivity`：三个输入框 + 测试连接 + 保存
+- [x] `ServerConfigActivity`：地址 / 用户名 / 密码 / 别名四个输入框 + 测试连接 + 保存
 - [x] SharedPreferences 持久化配置
 - [x] `isConfigured(Context)` 静态判定，已配置则跳过本页（当前由 `ServerStore.list()` 替代）
 
-**产出**：`build.gradle`, `app/build.gradle`, `gradle.properties`, `ServerConfigActivity.java`(242行), `activity_server_config.xml`
+**产出**：`build.gradle`, `app/build.gradle`, `gradle.properties`, `ServerConfigActivity.java`(244行), `activity_server_config.xml`
 
 **测试**：`design.md` §8.2 `NetworkUtilsTest`；配置读写为手工验证项
 
 **演示**：首次启动显示配置界面 → 输入地址凭据 → 测试连接成功 → 保存 → 进入主界面
 
-**遗留问题**：`gradle-wrapper.jar` 当前为 0 字节占位文件，**必须在推送前替换**（否则 CI 的 `./gradlew` 无法运行）
+**历史问题（已解决）**：初版 wrapper jar 为 0 字节；任务 10 已替换，当前为 43453 字节，不再是待修阻塞项。
 
 ---
 
@@ -90,7 +96,7 @@
 **目标**：实现 PROPFIND 请求、XML 解析、Basic Auth 认证
 
 **实现**
-- [x] `WebDAVClient` 单例（`synchronized getInstance()`）
+- [x] `WebDAVClient.forServer(profile)` 按服务器创建实例并绑定凭据；底层共享 OkHttpClient。`getInstance()` 仅为遗留兼容入口，不是当前多服务器架构
 - [x] `listFolder(path, callback)`：PROPFIND + `Depth: 1`
 - [x] XML 解析提取 `href` / `getcontentlength` / `getlastmodified` / `getcontenttype` / `getetag` / `resourcetype`
 - [x] Basic Auth 请求头
@@ -98,9 +104,9 @@
 - [x] `testConnection()` 供配置页调用
 - [x] 过滤 `.DS_Store` 与 `._` 前缀文件
 
-**产出**：`WebDAVClient.java`(385行)
+**产出**：`WebDAVClient.java`(839行)
 
-**测试**：`design.md` §8.2 `WebDAVResponseParserTest`（8 个用例，含中文路径与命名空间变体）
+**测试**：`WebDAVResponseParserTest`（13 个用例，含中文路径与命名空间变体）
 
 **演示**：配置页"测试连接"成功获取根目录文件列表
 
@@ -116,9 +122,9 @@
 - [x] `FileUtils`：`isAudioFile` / `isImageFile` / `isLyricsFile` / `formatFileSize` / `formatDuration` / 路径操作
 - [x] `NetworkUtils`：连通性检测 / 网络类型 / `getNetworkStatusString`
 
-**产出**：`WebDAVFile.java`(125行), `FileUtils.java`(208行), `NetworkUtils.java`(217行)
+**产出**：`WebDAVFile.java`(195行), `FileUtils.java`(208行), `NetworkUtils.java`(217行)
 
-**测试**：`design.md` §8.2 `FileUtilsTest`（10 个用例，覆盖中文文件名与大小写不敏感）
+**测试**：`FileUtilsTest`（9 个用例，覆盖中文文件名与大小写不敏感）
 
 **演示**：单元测试验证扩展名判定与格式化输出
 
@@ -136,7 +142,7 @@
 - [x] 加载状态指示
 - [x] `onBackPressed()` 返回上级，根目录交由系统处理
 
-**产出**：`MainActivity.java`(731行), `FileListAdapter.java`(216行), `activity_main.xml`, `view_mini_player.xml`
+**产出**：`MainActivity.java`(3049行), `FileListAdapter.java`(353行), `activity_main.xml`, `view_player_bar.xml`
 
 **测试**：UI 交互为手工验证项（见 `design.md` §8.3）
 
@@ -146,32 +152,33 @@
 
 ## 任务 5 — 音乐文件识别与列表展示 `[x]`
 
-**目标**：识别音频文件，展示文件信息，关联封面与歌词
+**目标**：识别音频并展示文件信息；保留图片/歌词类型判定，但不把类型判定误记成封面关联或列表展示
 
 **实现**
 - [x] 9 种音频扩展名过滤：mp3 / m4a / flac / wav / wma / aac / ogg / ape / opus
 - [x] 条目显示文件名 + 人性化大小
-- [x] 封面图识别（`Cover.jpg` / `cover.jpg` / `folder.jpg`）
-- [x] 歌词文件识别（`.lrc` / `.ttml`）
-- [x] 图片与歌词分类展示，不与音频混淆
+- [ ] **范围外 / 未实现**：封面关联（`Cover.jpg` / `cover.jpg` / `folder.jpg`）；类型工具不等于封面加载链路（R3.3）
+- [x] 歌词文件类型识别（`.lrc` / `.ttml`）；v1.44 起同名 `.lrc` 展示另见任务 27
+- [x] `FileListAdapter.setFiles()` 只保留文件夹与音频；图片/歌词图标分支被过滤挡住、不可达（R3.5）
+- [ ] **范围外 / 未实现**：图片与歌词在目录列表分类展示；原完成标记错误，不计入当前交付范围
 
 **产出**：`FileListAdapter.java`, `item_file.xml`, `FileUtils.java`
 
 **测试**：`design.md` §8.2 `FileUtilsTest`
 
-**演示**：音频列表显示文件名与大小，非音频文件分类展示
+**演示**：列表只显示文件夹与音频；音频显示文件名与大小，图片/歌词不出现。
 
 ---
 
-## 任务 6 — 下载管理系统 `[x]`
+## 任务 6 — 下载管理系统 `[-]`
 
 **目标**：实现下载、进度显示、状态持久化、视觉标记
 
 **实现**
 - [x] 下载按钮触发下载（OkHttp 异步 + 进度回调）
-- [x] 实时进度条（`runOnUiThread` 更新）
+- [ ] 实时下载百分比尚未接通：MainActivity 的 onProgress 仅写日志，当前只有下载中状态与加载提示（R4.2）
 - [x] 下载到 `getExternalFilesDir("music")`
-- [x] **已完成条目文字变绿 `#4CAF50`**
+- [x] 已完成条目使用 `download_state_downloaded`：浅色 `#4CAF50`，深色 `#81C784`；正在播放时优先使用播放高亮色
 - [x] 未下载条目保持默认色
 - [x] 下载状态持久化到 SharedPreferences（重启后仍为绿色）
 - [x] 删除本地缓存 + 清除记录
@@ -195,11 +202,11 @@
 - [x] 在线播放携带 `Authorization` 头（`setDataSource(Context, Uri, headers)`）
 - [x] 播放列表（当前文件夹音频）+ 当前索引
 - [x] 播放 / 暂停 / 上一首 / 下一首 / 进度拖动
-- [x] `Handler` 每 500ms 回调更新进度
+- [x] `Handler` 每 1000ms 回调更新进度；歌词滚动另用 80ms 轮询（任务 27）
 - [x] 迷你播放器 UI
 - [x] `OnPlaybackListener` 状态回调
 
-**产出**：`MusicPlayer.java`(331行, 22 个 public 方法), `view_mini_player.xml`
+**产出**：`MusicPlayer.java`(1480行), `view_player_bar.xml`
 
 **测试**：`design.md` §8.2 `MusicPlayerTest`
 
@@ -207,7 +214,7 @@
 
 ---
 
-## 任务 8 — 离线快照机制 `[x]`
+## 任务 8 — 离线快照机制 `[-]`
 
 **目标**：实现文件夹快照与离线浏览（**核心需求**）
 
@@ -215,14 +222,14 @@
 - [x] 每次成功列出文件夹后自动保存 JSON 快照
 - [x] `loadSnapshot(path)` 读取快照
 - [x] `hasSnapshot(path)` 判定是否存在
-- [x] **离线降级链**：网络请求失败 → 读快照 → 无快照则提示
+- [ ] **离线降级链未完整接通**：在线快照按 serverId:路径保存，showLocalDownloads 仍按裸路径读取（R1.10 / R6.2）
 - [x] 网络状态检测与 UI 标识
-- [x] 快照不序列化本地状态字段（避免"快照说已下载、实际已删"的不一致）
+- [x] 当前快照实际序列化 `downloadState` / `localPath` / `serverId`（`LocalCacheManager.fileToJson`）；渲染前由 `MainActivity.updateFileDownloadStates()` 按本地文件存在性校正，不把历史设计当现状
 - [x] 在线访问时以服务器结果覆盖旧快照
 
-**产出**：`LocalCacheManager.java`(328行) 快照部分 + `NetworkUtils.java` + `MainActivity.loadFolder()`
+**产出**：`LocalCacheManager.java`(683行) 快照部分 + `NetworkUtils.java` + `MainActivity.loadCurrentPath()`
 
-**测试**：`design.md` §8.2 `LocalCacheManagerTest`（快照往返、不含本地状态、覆盖更新）
+**测试**：`LocalCacheManagerTest`（快照往返包含本地状态、空目录、覆盖、损坏降级、隔离）；并非“不含本地状态”。
 
 **演示**：打开飞行模式 → 仍可浏览曾访问过的文件夹 → 播放已下载音乐
 
@@ -289,7 +296,7 @@
 
 ---
 
-## 任务 11 — 单元测试补充 `[~]` 部分完成（v1.43）
+## 任务 11 — 单元测试补充 `[-]` 部分完成（截至 v1.50）
 
 **目标**：按 `design.md` §8 实现测试用例
 
@@ -315,7 +322,11 @@
 **前置条件**：已引入 `org.robolectric:robolectric:4.13` 与
 `testOptions.unitTests.includeAndroidResources`；MockWebServer 未引入（当前用例不触网）
 
-**产出**：`app/src/test/java/com/byron/davmusic/*Test.java`（6 个类 / 62 个用例）
+**后续补充（v1.44–v1.47）**
+- [x] `LrcParserTest`：21 个用例（解析/编码/歌手提取/路径/当前行二分定位）
+- [x] `LyricsQueryTest`：6 个用例；`LyricsSearchClientTest`：8 个用例
+
+**产出**：`app/src/test/java/com/byron/davmusic/*Test.java`（9 个类 / 97 个 `@Test`；源码静态计数，不等同于本次运行结果）
 
 **演示**：CI 步骤 `./gradlew testDebugUnitTest` 全部通过；红了不出 APK
 
@@ -336,7 +347,7 @@
 - [x] `WAKE_LOCK` / `FOREGROUND_SERVICE_MEDIA_PLAYBACK` 权限
 - [x] `stopSelf()` 释放
 
-**产出**：`MusicService.java`(595行) + `AndroidManifest.xml` service 声明
+**产出**：`MusicService.java`(630行) + `AndroidManifest.xml` service 声明
 
 **测试**：真机手工验证（锁屏控制、耳机按键、后台续播）
 
@@ -347,7 +358,7 @@
 
 ---
 
-## 任务 13 — 多服务器管理 `[x]`
+## 任务 13 — 多服务器管理 `[-]`
 
 **目标**：支持配置多台 WebDAV 服务器，并隔离各自的缓存
 
@@ -355,17 +366,17 @@
 - [x] `ServerProfile`：id / 别名 / url / 凭据 + `getScopeId()` / `getDisplayName()` / JSON 往返
 - [x] `ServerStore`：`list` / `getActive` / `add` / `update` / `setActive` / `remove` / `isAliasTaken`
 - [x] **`pickActive()` 回退**：activeId 失配则退回第一台，避免跳回配置页
-- [x] `ServerManageActivity`：服务器列表 + 新增/编辑/删除/设为活动
-- [x] `ServerListAdapter`：展示别名 / 主机 / 活动标记
-- [x] **`getScopeId()` 作用域**：缓存键 = `scopeId + path`，防跨服务器串扰
-- [x] 删除服务器时清理其作用域下的缓存与快照
+- [x] `ServerManageActivity`：服务器列表 + 新增/编辑/删除/进入；不要求全局“设为活动”
+- [x] `ServerListAdapter`：展示服务器别名 / 主机，点击即进入（方案 A）
+- [x] 当前条目 `serverId` + 相对路径组成 `getCacheKey()`（`serverId:relativePath`），防跨服务器串扰；`getScopeId()` 仅为遗留兼容
+- [ ] **旧完成标记纠正**：删除服务器时自动清理对应缓存/快照未实现；`ServerManageActivity.doDelete` → `ServerStore.remove` 只删配置并修正兼容活动指针，没有缓存清理调用
 - [x] 旧版单服务器 key（`server_url` 等）兼容读取
 
-**产出**：`ServerProfile.java`(155行), `ServerStore.java`(291行), `ServerManageActivity.java`(310行), `ServerListAdapter.java`(125行)
+**产出**：`ServerProfile.java`(156行), `ServerStore.java`(292行), `ServerManageActivity.java`(310行), `ServerListAdapter.java`(126行)
 
 **测试**：`design.md` §8.2 `ServerProfileTest` / `ServerStoreTest`
 
-**演示**：新增两台服务器 → 切换 → 各自浏览互不干扰
+**演示**：新增两台服务器 → 根层级分别进入 → 各自浏览互不干扰；`getActive/setActive/pickActive` 保留仅兼容，不恢复“活动服务器 + 切换清缓存”。
 
 ---
 
@@ -393,40 +404,40 @@
 
 ---
 
-## 任务 15 — 本地离线索引与目录树重建 `[x]`
+## 任务 15 — 本地离线索引与目录树重建 `[-]`
 
 **目标**：离线时不只靠快照，已下载文件也能独立构成可浏览的目录树
 
 **实现**
 - [x] `indexOfflineFile(remotePath, displayName, size)`：下载成功即写索引
-- [x] `removeOfflineIndex(...)`：删除本地文件时同步清理
+- [ ] `removeOfflineIndex(...)` 虽存在，但 removeDownloadedFile 未调用，删除本地文件不保证索引同步清理
 - [x] `listLocalTree(currentPath)`：按远程路径归组重建目录树
 - [x] `getOfflineFileCount()`：离线文件计数（关于页展示）
-- [x] 离线降级链扩为三级：快照 → 本地索引 → 提示
+- [ ] 离线链路完整性：下载映射用 getCacheKey()、离线索引用 href，listLocalTree 查映射时键不一致，且未按服务器过滤（R6.7–R6.8）
 
-**产出**：`LocalCacheManager.java`(575行) 索引部分
+**产出**：`LocalCacheManager.java`(683行) 索引部分
 
-**测试**：`design.md` §8.2 `LocalCacheManagerTest`（目录树重建、索引同步）
+**测试**：现有 LocalCacheManagerTest 仅覆盖快照；目录树重建与索引同步尚无自动化测试。
 
-**演示**：下载若干歌曲 → 断网 → 浏览从未在线访问过的目录（由索引重建）
+**待验证目标**：下载后断网重建目录树；当前受上述键不一致限制，不记为已验收。
 
 ---
 
-## 任务 16 — 定位到当前歌曲 `[x]`
+## 任务 16 — 定位到当前歌曲 `[-]`
 
-**目标**：从深层目录跳回当前播放曲目所在位置
+**目标**：定位当前播放曲目；当前仅支持在可见目录列表内滚动，不自动跳转目录
 
 **实现**
 - [x] "更多"菜单 → "定位到当前歌曲"
-- [x] 由当前曲目远程路径推出所在目录
-- [x] 无播放曲目或未进入服务器时给出提示
-- [x] 定位后滚动到该条目并高亮
+- [x] 用 `MusicPlayer.isSameTrack` 在当前 `FileListAdapter.getFiles()` 内查找，命中后 `smoothScrollToPosition`；播放高亮由适配器维持
+- [x] 无曲目提示；列表未就绪提示；未命中则以 Toast 显示带服务器别名的完整曲目路径
+- [ ] **未实现**：自动进入歌曲所属目录/服务器再滚动。证据：`MainActivity.locateCurrentTrack()`（2824–2867 行）无 `enterServer` / `loadFolder` / 导航调用，未命中仅调用 `trackFullPath` 与 Toast；原完成描述错误
 
 **产出**：`MainActivity.locateCurrentTrack()`
 
 **测试**：真机手工验证
 
-**演示**：播放某曲 → 浏览到别处 → 菜单定位 → 回到该曲目所在目录并高亮
+**演示**：播放某曲 → 在同目录滚动到别处 → 菜单定位 → 滚回该条目；换目录后定位仅提示完整路径，不自动跳回。
 
 ---
 
@@ -439,7 +450,7 @@
 - [x] 本地缓冲 + 批量上报，避免频繁网络请求
 - [x] 覆盖播放/服务/媒体会话关键路径
 
-**产出**：`RemoteLogger.java`(251行)
+**产出**：`RemoteLogger.java`(565行)
 
 **测试**：手工验证（日志可在服务端查看）
 
@@ -458,7 +469,7 @@
 - [x] 遇 429 仅向用户提示（v1.24）
 - [x] **移除失败计数与自动退避重试** —— 与服务器限制叠加会自锁
 
-**产出**：`WebDAVClient.java` 缓存与节流部分
+**产出**：`MainActivity.java` 的 `dirCache` / `dirCacheTime` / `DIR_CACHE_TTL_MS`（5 分钟，键含服务器）与 429 提示；不在 `WebDAVClient` 内另建退避层
 
 **测试**：真机手工验证（观察请求量与 429 表现）
 
@@ -475,7 +486,7 @@
 **实现**
 - [x] `app/build.gradle` 配置固定 keystore
 - [x] keystore 路径用 `rootProject.file()` 解析（app 模块相对路径会失败）
-- [x] `.gitignore` 排除 keystore 与密码文件
+- [x] CI 显式引用仓库已跟踪的 `keystore/davmusic.p12` 固定 debug 签名；不是“keystore 已被排除”，勿改成 runner 临时生成的签名
 
 **产出**：签名配置
 
@@ -498,9 +509,9 @@
 - [x] 消除切歌时的误报错误（v1.26）
 - [x] 播放时间被布局裁掉（容器高度不足，v1.27）
 - [x] 蓝牙耳机按键控制（v1.22）
-- [x] 单一播放线程串行化
+- [x] 主 Looper Handler 调度回调；没有独立播放线程或所有 public 方法统一串行封送（R9.7）
 
-**产出**：`MusicPlayer.java`(1039行), `MusicService.java`
+**产出**：`MusicPlayer.java`(1480行), `MusicService.java`
 
 **测试**：真机长时验证
 
@@ -524,7 +535,7 @@
 - [x] 在线播放失败（URL 未编码 + href/相对路径混用）
 - [x] 路径解析：href 前缀剥离失败导致路径重复与 404
 
-**产出**：`MainActivity.java`, `FileListAdapter.java`(320行)
+**产出**：`MainActivity.java`, `FileListAdapter.java`(353行)
 
 **测试**：真机手工验证
 
@@ -629,7 +640,7 @@ requirements 曾把「播放模式」列在范围外。这次是补做，不是�
 - [x] v1.34 起上报成功后**精确清理**该份内容，避免重复上传
 - [x] 收敛单端点（v1.32 曾是双端点互为备份）
 
-**产出**：`RemoteLogger.java`(565 行)
+**产出**：`RemoteLogger.java`(565行)
 
 **测试**：真机手工验证（未配置跳过、错令牌 401、手机时间不准 clock_skew、成功后不重复上传）
 
@@ -659,11 +670,11 @@ requirements 曾把「播放模式」列在范围外。这次是补做，不是�
 - [x] 排序后 `post` 到下一帧，用 `scrollToPositionWithOffset(当前曲目, 视口 1/3)` 定位；
       当前曲目不在本目录时回到列表顶部
 
-**产出**：`TrackSorter.java`(新增 166 行), `HttpDateParser.java`(新增 62 行),
+**产出**：`TrackSorter.java`(166行), `HttpDateParser.java`(62行),
 `WebDAVClient.java`, `FileListAdapter.java`, `MusicPlayer.java`, `MainActivity.java`,
 `res/menu/main_menu.xml`, `res/values/strings.xml`
 
-**测试**：纯 JVM 用例表（排序比较器 + 时间解析，20 条）全部通过；真机手工验证待出包
+**测试**：v1.43 起 `TrackSorterTest`（11 例）+ `HttpDateParserTest`（10 例）接入 CI；旧“待出包”状态已过期。当前 v1.50 用户持续实机使用确认正常，本次未重新执行构建。
 
 **演示**：播放一首歌 → 切「按名称」→ 歌不断、队列顺序跟着变、列表自动滚到正在播的那首
 
@@ -700,7 +711,7 @@ requirements 曾把「播放模式」列在范围外。这次是补做，不是�
 **实现**
 - [x] `LyricsQuery`：文件名 → 关键词（去扩展名、去 `10 `/`第10首` 前缀；不拆歌手）
 - [x] `LyricsSearchClient`：LRCLIB `/api/search`，带 UA；只收带时间轴的条目；
-      按当前歌曲时长接近度排序；429 如实提示、不重试
+      排除 `instrumental=true`，按当前歌曲时长接近度排序（当前时长未知则保留服务端顺序）；429 如实提示，无应用层轮询/退避重试
 - [x] `LyricsActivity`：「暂无歌词 / 加载失败」时显示「搜索歌词」按钮 →
       关键词弹窗（可编辑）→ 结果列表选择 → 应用
 - [x] `WebDAVClient.putBytes`：PUT + `If-None-Match: *`，已有同名文件不覆盖
@@ -721,10 +732,43 @@ requirements 曾把「播放模式」列在范围外。这次是补做，不是�
 - [x] 歌词页改为「上方歌词（weight=1）+ 底部播放条」；歌词居中按实际可用高度计算
 - [x] 双击歌词：`GestureDetector` + `findChildViewUnder` 取行号 → `seekTo`，
       **只定位不自动播放**；立即高亮并屏蔽 ticker 约 1 秒
-- [x] 越界 / 未 prepare 时提示
+- [x] 正在 prepare / 时长未知时提示；目标 `>= duration - 300ms` 时按越界拒绝（保留尾部 300ms 安全余量）
 - [x] `LrcParser.indexAt`：二分查找当前行（纯逻辑，测试 +1）
 
 **演示**：CI `testDebugUnitTest` 通过；真机拖进度、切歌、双击某句定位
+
+## 任务 30 — 系统媒体控制中心进度拖动（v1.48） `[x]`
+
+**目标**：系统媒体控制中心/锁屏拖动进度后，真正更新播放位置（R9.9）
+
+**实现**
+- [x] `MusicService.MediaSessionCompat.Callback.onSeekTo(long)` 调用 `MusicPlayer.seekTo`；仅声明 `ACTION_SEEK_TO` 不会执行定位
+- [x] 时长已知时夹到 `[0, duration]`，未知时至少限制为非负
+- [x] seek 异步：移除上次延迟同步，400ms 后 `syncPlaybackState` 回写真实位置；原有每秒进度刷新保留
+
+**产出**：`MusicService.java`（提交 `354663d`）
+
+**验证**：代码路径与提交核对；v1.50 用户持续实机使用确认正常。本次未单独重测系统媒体 UI。
+
+---
+
+## 任务 31 — 跟随系统深色模式与列表文字修复（v1.49–v1.50） `[x]`
+
+**目标**：避免只有菜单/对话框变深而列表仍浅，以及深色背景上黑字不可见
+
+**实现**
+- [x] 保留 DayNight 主题，新增 `values-night/colors.xml`，跟随系统夜间配置；没有应用内手动主题开关
+- [x] 深色背景 `#121212`、表面 `#1E1E1E`，正文/图标/播放条/下载状态/播放高亮使用对应夜间颜色；网络状态虽有夜间资源，`MainActivity.updateNetworkStatus()` 仍直接引用系统 holo 红/绿，不夸大为全部接入
+- [x] 主题补齐 `colorSurface` / `colorOnSurface` / `colorOnBackground` / `colorError`，对话框背景使用 surface
+- [x] 16 个矢量图标改用 `@color/icon_normal`，列表 ripple 改用 `@color/ripple`；主界面及歌词搜索对话框使用 AppCompat AlertDialog
+- [x] v1.50 将 `FileListAdapter` 文件夹及普通文件名的两处硬编码黑色改为 `R.color.text_primary`，保留下载/播放状态色优先级
+- [x] 歌词内容区仍是固定深色布局；不把该页面误记为整页随系统切换
+
+**产出**：`values-night/colors.xml`、`values/colors.xml`、`values/themes.xml`、矢量图标与列表 ripple、`MainActivity.java`、`LyricsActivity.java`、`FileListAdapter.java`（提交 `8ef5bf1`、`fba3714`）
+
+**验证**：源码/资源与提交核对；用户已持续实机使用 v1.50 并明确确认正常。此次为 spec 对齐，不新增代码或冒充新一轮真机验收。
+
+---
 
 ## 依赖关系
 
@@ -749,21 +793,26 @@ requirements 曾把「播放模式」列在范围外。这次是补做，不是�
 任务7 (播放) ← 任务22 (播放模式) ← 依赖 任务12 (前台服务/MediaSession 的切歌链路)
 任务2 (WebDAVClient) ← 任务23 (新建文件夹 MKCOL)
 任务2 (WebDAVClient) ← 任务24 (删除远端 DELETE)
-任务17 (远程日志) ← 任务25 (HMAC 鉴权与端点可配) ← 依赖 任务2 (PUT 上报走同一客户端)
-任务2 (WebDAVClient) ← 任务26 (真实时间解析) ← 任务22 (播放模式/预加载) ← 任务26 (队列重排)
+任务17 (远程日志) → 任务25 (HMAC 鉴权与端点可配；RemoteLogger 使用独立 uploadClient，不依赖 WebDAVClient PUT)
+任务2/4/7/22 → 任务26 (真实时间解析、列表排序与队列重排)
+任务2/7 → 任务27 (全屏歌词) → 任务28 (搜索与上传，依赖任务2 的 putBytes)
+任务7/22/27 → 任务29 (共享播放条与双击歌词定位)
+任务7/12 → 任务30 (系统媒体控制中心 seek)
+任务4/5/27/28/29 → 任务31 (系统深色色板、对话框/图标与列表文字)
+任务27/28/29 → 任务11 (歌词逻辑测试增至 9 类 / 97 例)
 ```
 
 **可并行组**：任务 2 与任务 3 相互独立；任务 6、7、8、9 在 2+3 完成后可并行。
 
 ---
 
-## 任务状态总览（代码 v1.39）
+## 任务状态总览（代码 v1.50 / `fba3714`）
 
 | 分类 | 状态 |
 |------|------|
-| 脚手架与核心功能（1–9） | 全部完成 |
+| 脚手架与核心功能（1–9） | 任务 6 下载百分比/残留清理、任务 8 离线快照链路仍有缺口；任务 5 的封面关联/图片歌词列表展示为范围外 |
 | CI 与产物（10） | 完成（可出包，真机可装） |
-| 单元测试（11） | **部分完成**：6 个测试类 / 62 个用例已接入 CI（纯 JVM + Robolectric，无模拟器）；`MusicPlayerTest`、`NetworkUtilsTest` 待补 |
-| 真机迭代增强（12–29） | 全部完成 |
+| 单元测试（11） | **部分完成**：9 个测试类 / 97 个 `@Test` 接入既有 CI（纯 JVM + Robolectric）；`MusicPlayerTest`、`NetworkUtilsTest` 待补；本次未重跑 |
+| 真机迭代增强（12–31） | v1.50 用户持续实机使用确认正常；任务 13 删除服务器清缓存、任务 15 离线索引链路、任务 16 跨目录定位尚未完整实现，标为部分完成 |
 
-**代码规模**：24 个类 / 11050 行（v1.47；v1.46 为 23 个类 / 10789 行；v1.45 为 21 个类 / 10395 行；v1.44 为 21 个类 / 10368 行；v1.43 为 18 个类 / 9730 行；v1.42 为 17 个类 / 9680 行；v1.39 为 15 个类 / 9247 行；初版为 9 个类 / 2783 行）
+**代码规模**：24 个生产 Java 文件 / 11081 物理行（v1.50 / `fba3714`，仅 `app/src/main/java/com/byron/davmusic/*.java`，按 `splitlines()` 计数，含注释与空行；`wc -l` 按换行符计为 11078）。测试另计：9 个测试类 / 97 个 `@Test`。各任务产出中的行数统一为本次源码统计，不混用历史版本规模。
