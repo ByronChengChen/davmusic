@@ -302,9 +302,7 @@ public class LocalCacheManager {
             String snapshotJson = snapshot.toString();
             File snapshotFile = getSnapshotFile(folderPath);
             
-            try (FileOutputStream fos = new FileOutputStream(snapshotFile)) {
-                fos.write(snapshotJson.getBytes());
-            }
+            AtomicSnapshotWriter.write(snapshotFile, snapshotJson);
             
             Log.d(TAG, "Saved snapshot for: " + folderPath);
         } catch (JSONException | IOException e) {
@@ -319,12 +317,10 @@ public class LocalCacheManager {
         }
         
         try {
-            byte[] buffer = new byte[(int) snapshotFile.length()];
-            try (FileInputStream fis = new FileInputStream(snapshotFile)) {
-                fis.read(buffer);
-            }
-            
-            String jsonStr = new String(buffer);
+            // Read through one open file, not length(path) followed by open(path):
+            // an atomic replacement between those calls can change the snapshot size.
+            byte[] buffer = java.nio.file.Files.readAllBytes(snapshotFile.toPath());
+            String jsonStr = new String(buffer, java.nio.charset.StandardCharsets.UTF_8);
             JSONObject snapshot = new JSONObject(jsonStr);
             
             JSONArray filesArray = snapshot.getJSONArray("files");

@@ -175,6 +175,43 @@ public class LocalCacheManagerTest {
     }
 
     @Test
+    public void concurrentSnapshotReplacementNeverBreaksJsonRead() throws Exception {
+        List<WebDAVFile> small = new ArrayList<>();
+        small.add(audio("短.mp3", 1));
+        List<WebDAVFile> large = new ArrayList<>();
+        for (int i = 0; i < 80; i++) large.add(audio("中文长目录歌曲" + i + ".mp3", i));
+        cache.saveSnapshot(FOLDER, small);
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(4);
+        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        List<java.util.concurrent.Future<?>> jobs = new ArrayList<>();
+        try {
+            for (int worker = 0; worker < 4; worker++) {
+                final int id = worker;
+                jobs.add(pool.submit(() -> {
+                    start.await();
+                    for (int i = 0; i < 60; i++) {
+                        if (id < 2) cache.saveSnapshot(FOLDER, i % 2 == 0 ? small : large);
+                        else {
+                            List<WebDAVFile> loaded = cache.loadSnapshot(FOLDER);
+                            assertNotNull(loaded);
+                            assertTrue(loaded.size() == 1 || loaded.size() == 80);
+                            assertEquals(loaded.size() == 1 ? "短.mp3" : "中文长目录歌曲0.mp3",
+                                    loaded.get(0).getDisplayName());
+                        }
+                    }
+                    return null;
+                }));
+            }
+            start.countDown();
+            for (java.util.concurrent.Future<?> job : jobs)
+                job.get(60, java.util.concurrent.TimeUnit.SECONDS);
+        } finally {
+            pool.shutdownNow();
+            assertTrue(pool.awaitTermination(60, java.util.concurrent.TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
     public void differentFoldersHaveIndependentSnapshots() {
         List<WebDAVFile> a = new ArrayList<>();
         a.add(audio("a.mp3", 1));

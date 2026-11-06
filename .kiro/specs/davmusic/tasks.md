@@ -20,7 +20,7 @@
 > 任务 30 覆盖 v1.48 系统媒体控制中心 seek；任务 31 覆盖 v1.49–v1.50 深色模式与列表文字修复。
 > 2026-11-01 修订：核对 `fba3714`（versionCode 150 / versionName 1.50），补齐任务 30–31、
 > 总览/依赖/状态摘要，纠正封面与列表可见性、活动服务器、快照字段、缓存位置及测试数量的旧描述。
-> 本清单已与代码 **v1.50（24 个生产 Java 文件 / 11081 物理行）** 对齐；用户已持续实机使用并确认 v1.50 正常。
+> v1.50 用户已持续实机使用并确认正常；当前工作区为 **v1.51 交付预备（25 个生产 Java 文件 / 11126 物理行）**，任务 32 的本地纯 JVM 验证通过，CI / 真机待验收。
 
 ---
 
@@ -59,6 +59,7 @@
 | **29** | **歌词页播放控制条 + 双击定位** | `[x]` | R14.12–R14.13 | `view_player_bar`, `PlayerBarController`, `LrcParser.indexAt`, `LyricsActivity` |
 | **30** | **系统媒体控制中心进度拖动（v1.48）** | `[x]` | R9.9 | `MusicService.onSeekTo` / `syncPlaybackState` |
 | **31** | **系统深色模式与列表文字修复（v1.49–v1.50）** | `[x]` | R15.1–R15.4 | `values-night/colors.xml`, 主题/图标, `FileListAdapter` |
+| **32** | **目录快照原子写入（v1.51 预备）** | `[-]` | R6.11 | 原子写入与本地纯 JVM 已验证；CI / 真机待验收 |
 
 > **说明**：任务 1–9 由 Kiro 执行 agent 一次完成（9 个 Java 文件 / 2783 行）。
 > 任务 12–21 是后续在真机验证中迭代出来的实际工作，原 spec 未记录，本次补入。
@@ -227,7 +228,7 @@
 - [x] 当前快照实际序列化 `downloadState` / `localPath` / `serverId`（`LocalCacheManager.fileToJson`）；渲染前由 `MainActivity.updateFileDownloadStates()` 按本地文件存在性校正，不把历史设计当现状
 - [x] 在线访问时以服务器结果覆盖旧快照
 
-**产出**：`LocalCacheManager.java`(683行) 快照部分 + `NetworkUtils.java` + `MainActivity.loadCurrentPath()`
+**产出**：`LocalCacheManager.java`(679行) 快照部分 + `NetworkUtils.java` + `MainActivity.loadCurrentPath()`
 
 **测试**：`LocalCacheManagerTest`（快照往返包含本地状态、空目录、覆盖、损坏降级、隔离）；并非“不含本地状态”。
 
@@ -415,7 +416,7 @@
 - [x] `getOfflineFileCount()`：离线文件计数（关于页展示）
 - [ ] 离线链路完整性：下载映射用 getCacheKey()、离线索引用 href，listLocalTree 查映射时键不一致，且未按服务器过滤（R6.7–R6.8）
 
-**产出**：`LocalCacheManager.java`(683行) 索引部分
+**产出**：`LocalCacheManager.java`(679行) 索引部分
 
 **测试**：现有 LocalCacheManagerTest 仅覆盖快照；目录树重建与索引同步尚无自动化测试。
 
@@ -770,6 +771,22 @@ requirements 曾把「播放模式」列在范围外。这次是补做，不是�
 
 ---
 
+## 任务 32 — 目录快照原子写入（v1.51 交付预备） `[-]`
+
+- [x] `AtomicSnapshotWriter` 同目录唯一临时文件、UTF-8、flush/sync/close、原子替换；原子移动不可用时失败关闭
+- [x] 写入/发布失败保留旧目标；首次失败不产生目标；尝试清理本次临时文件，不直接覆盖、不非原子降级
+- [x] `LocalCacheManager.saveSnapshot` 接入；读取改为一次打开完整读取，修复先 length 再 open 的并发截断竞争
+- [x] 永久新增纯 JVM 7 例 + Robolectric 并发 JSON 往返 1 例；本地无 JUnit main 与永久用例共享检查
+- [x] 本地 RED：旧真实直接覆盖模式写中 IOException 后目标变成 `{partial`；GREEN：7 场景 PASS，含 6 线程、450 次写 + 450 次读
+- [x] 版本预备 `versionCode 151` / `versionName 1.51`；三份 spec 对齐；不修改搜索、离线索引、网络与 AGENTS
+- [ ] 云端 JUnit / Robolectric、Android APK 构建与真机验证（本次未授权推送，未触发 CI）
+
+**边界**：原子可见性并非突然断电后的目录项持久性；被杀可能遗留未发布临时文件；并发保存最后成功发布者生效。不改变删除/清空与在途保存的原有先后语义，不修离线键缺口。
+
+**产出**：`AtomicSnapshotWriter.java`（49 行）、`LocalCacheManager.java`、`AtomicSnapshotWriterChecks.java`、`AtomicSnapshotWriterTest.java`、`LocalCacheManagerTest.java`、`app/build.gradle` 与三份 spec。
+
+---
+
 ## 依赖关系
 
 ```
@@ -800,19 +817,20 @@ requirements 曾把「播放模式」列在范围外。这次是补做，不是�
 任务7/12 → 任务30 (系统媒体控制中心 seek)
 任务4/5/27/28/29 → 任务31 (系统深色色板、对话框/图标与列表文字)
 任务27/28/29 → 任务11 (歌词逻辑测试增至 9 类 / 97 例)
+任务8/11 → 任务32 (快照原子写入；测试增至 10 类 / 105 例，新增待 CI)
 ```
 
 **可并行组**：任务 2 与任务 3 相互独立；任务 6、7、8、9 在 2+3 完成后可并行。
 
 ---
 
-## 任务状态总览（代码 v1.50 / `fba3714`）
+## 任务状态总览（v1.51 工作区交付预备，基于 `5dd5338`）
 
 | 分类 | 状态 |
 |------|------|
 | 脚手架与核心功能（1–9） | 任务 6 下载百分比/残留清理、任务 8 离线快照链路仍有缺口；任务 5 的封面关联/图片歌词列表展示为范围外 |
 | CI 与产物（10） | 完成（可出包，真机可装） |
-| 单元测试（11） | **部分完成**：9 个测试类 / 97 个 `@Test` 接入既有 CI（纯 JVM + Robolectric）；`MusicPlayerTest`、`NetworkUtilsTest` 待补；本次未重跑 |
+| 单元测试（11） | **部分完成**：10 个测试类 / 105 个 `@Test`（新增 8 例待 CI）；本地 main 已实际通过 7 场景；`MusicPlayerTest`、`NetworkUtilsTest` 待补；JUnit/Robolectric 本次未运行 |
 | 真机迭代增强（12–31） | v1.50 用户持续实机使用确认正常；任务 13 删除服务器清缓存、任务 15 离线索引链路、任务 16 跨目录定位尚未完整实现，标为部分完成 |
 
-**代码规模**：24 个生产 Java 文件 / 11081 物理行（v1.50 / `fba3714`，仅 `app/src/main/java/com/byron/davmusic/*.java`，按 `splitlines()` 计数，含注释与空行；`wc -l` 按换行符计为 11078）。测试另计：9 个测试类 / 97 个 `@Test`。各任务产出中的行数统一为本次源码统计，不混用历史版本规模。
+**代码规模**：25 个生产 Java 文件 / 11126 物理行（v1.51 交付预备，仅 `app/src/main/java/com/byron/davmusic/*.java`，按 `splitlines()` 计数，含注释与空行；`wc -l` 按换行符计为 11123）。测试另计：10 个测试类 / 105 个 `@Test`，另有不含 JUnit 注解的共享 Checks。各任务产出中的行数统一为本次源码统计，不混用历史版本规模。

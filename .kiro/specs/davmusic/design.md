@@ -24,7 +24,9 @@
 > - v1.49–v1.50：夜间色板、主题/图标适配与列表文字色修复
 > - 2026-11-01：按 v1.50（`fba3714`，versionCode 150）核对实现；纠正客户端工厂、缓存归属、根列表适配器、歌词布局/双击、线程与测试覆盖描述，标注尚存实现偏差。
 >
-> **当前规模口径**：`app/src/main/java/**/*.java` 的 24 个源文件（按文件数，不含内部类、测试、生成代码），逐文件 `splitlines()` 物理行数合计 **11081 行**（含空行/注释）；`MainActivity.java` **3049 行**。历史版本规模仅作为当时记录，v1.46/v1.47 已按相同口径复核。
+> v1.51 交付预备：快照原子发布与并发读取修复（R6.11）；本地纯 JVM 已验证，CI / 真机尚未运行。
+>
+> **当前规模口径**：`app/src/main/java/**/*.java` 的 25 个源文件（按文件数，不含内部类、测试、生成代码），逐文件 `splitlines()` 物理行数合计 **11126 行**（含空行/注释）；`MainActivity.java` **3049 行**。历史版本规模仅作为当时记录，v1.46/v1.47 已按相同口径复核。
 
 ---
 
@@ -204,9 +206,12 @@ public class ServerProfile {
 | 命名 | `SHA-256(cacheKey)` 的前 16 位十六进制 + 原扩展名；外部私有目录不可用时回退 `filesDir/music` |
 | 映射 | 远程路径 → 本地路径的映射持久化到 SharedPreferences |
 
-**② 文件夹快照**（对应 R6.1–R6.6）
+**② 文件夹快照**（对应 R6.1–R6.6、R6.11）
 
 - 用户每次成功列出某文件夹后，把 `List<WebDAVFile>` 序列化为 JSON 写入本地文件
+- `saveSnapshot` 先完成 JSON 序列化，再委托 Android 无关的 `AtomicSnapshotWriter`：同目录 `Files.createTempFile` 唯一临时文件 → UTF-8 → flush → `FileDescriptor.sync()` → 关闭 → `Files.move(ATOMIC_MOVE, REPLACE_EXISTING)`；不支持原子移动时失败关闭，绝不降级复制/直接覆盖。
+- 写入/发布异常时删除本次临时文件，清理异常附加到原异常；目标从未先行截断。进程被杀可能遗留临时文件，普通读取/exists 不把临时文件当快照；原子可见性不承诺断电后的目录项持久性（未 fsync 父目录）。
+- 同一快照的并发写入各用独立临时文件，最后成功发布者生效；不锁读。`loadSnapshot` 使用 `Files.readAllBytes` 后按 UTF-8 解码，避免 `length(path)` 与 `open(path)` 之间替换导致按旧长度读取；delete/has/clear 仍用原有文件语义，不引入备份文件格式。
 - 快照键由**作用域 + 文件夹路径**派生
 - 目录为 `filesDir/snapshots`；序列化字段：`href`、`relativePath`、`serverId`、`serverName`、`displayName`、`contentLength`、`contentType`、`lastModified`、`etag`、`isCollection`、`downloadState`、`localPath`
 - `downloadState` / `localPath` **实际会入快照**；MainActivity 展示前用 `updateFileDownloadStates()` 按 `getCacheKey()` 查询磁盘与映射，覆盖恢复出的本地状态
@@ -874,7 +879,13 @@ public interface OnPlaybackListener {
 | 空列表 | 无服务器 → `getActive()` 返回 null |
 | 别名重复检测 | 与其它服务器同名 → `isAliasTaken` 返回 true |
 
-**`LocalCacheManagerTest`（Robolectric —— 已实现，7 个用例）**
+**`AtomicSnapshotWriterTest`（纯 JVM，新增 7 个用例，待 CI）**
+
+共享 `AtomicSnapshotWriterChecks` 的真实文件检查：新建（中文/emoji）、长→短覆盖、写中 IOException 保留旧文件、首次失败不发布、发布前可读旧文件、move 失败、并发读写；成功/失败均检查临时文件清理。该 Checks 的 main 可独立 javac/java 运行，不依赖 JUnit / Android SDK。
+
+本地证据：旧直接覆盖 baseline 在注入写中失败后读到 `{partial`（RED）；新 helper 的 7 场景均 PASS，包括 3 写线程共 450 次发布与 3 读线程共 450 次读取。额外复现旧读取 stat/open 竞争后，改用一次打开完整读取。JUnit/Robolectric、APK 与 Android 真机尚未运行，不将主机文件系统结果等同于 Android 验收。
+
+**`LocalCacheManagerTest`（Robolectric —— 已实现，8 个用例，其中新增并发读写待 CI）**
 
 | 用例 | 说明 |
 |------|------|
