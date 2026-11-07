@@ -106,9 +106,13 @@ public class SearchSongHistoryActivityTest {
         android.media.MediaPlayer media=(android.media.MediaPlayer)mediaField.get(player);
         assertNotNull(media); media.seekTo(15000); idle();
         int position=player.getCurrentPosition(); boolean playing=player.isPlaying();
+        long started=android.os.SystemClock.uptimeMillis();
         int delete=activity.getResources().getIdentifier("searchHistoryDelete","id",activity.getPackageName());
         row(0).itemView.findViewById(delete).performClick(); control("searchHistoryClear").performClick();
-        assertSame(media,mediaField.get(player)); assertEquals(position,player.getCurrentPosition()); assertEquals(playing,player.isPlaying());
+        assertSame(media,mediaField.get(player));
+        long elapsed=android.os.SystemClock.uptimeMillis()-started;
+        assertEquals(position+(playing ? elapsed : 0),player.getCurrentPosition(),2.0);
+        assertEquals(playing,player.isPlaying());
         assertEquals(1,player.getPlaylist().size()); assertEquals(a.getCacheKey(),player.getCurrentTrack().getCacheKey());
     }
     @Test public void searchResultClickStillCapturesFullDisplayedQueue() throws Exception {
