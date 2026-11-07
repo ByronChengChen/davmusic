@@ -1,4 +1,4 @@
-# 本地快照歌曲搜索（v1.52 CI 交付预备，未真机验收）
+# 本地快照歌曲搜索（v1.53 搜索播放闪烁修复，未真机验收）
 
 ## 边界
 - 数据只来自 `filesDir/snapshots/*.json`：所有当前配置服务器的已浏览目录。不是全库，不扫描远端、不递归、不建数据库，不用旧 offline_index。
@@ -27,5 +27,13 @@
 - `git diff --check`：无输出、退出 0。
 - RED 实测：文件名匹配期望 1 得到 0；聚合过滤期望 2 得到 7；异步三个场景旧回调错误交付；存储发布未递增 revision；跨服务器相同 href/路径被误判同首。各失败后实现并重跑到 GREEN。
 
+## v1.53 周期闪烁修复
+- 根因：SearchActivity.onProgress 每秒 notifyItemRangeChanged 全部可见行，触发重复绑定和 RecyclerView change 动画。播放进度现在只由 PlayerBarController 处理，搜索列表零通知；暂停/继续不影响行状态，也零通知。
+- 切歌只向旧/新 getCacheKey 对应行发送非空 payload，局部绑定高亮和下载状态；同一首重复回调不通知，跨服务器同路径不混淆。
+- LocalCacheManager 下载完成/删除/清空发出独立下载事件；SearchActivity 主线程比较已记录布尔状态，仅实际改变的行发 payload，不重新搜索或解析快照。onResume 只补查行状态（涵盖外部删除本地文件），不再无条件重新汇总/清空列表。
+- 查询/快照/服务器清单/排序真实变化才重新搜索。排序偏好监听随 Activity 创建/销毁注册/注销。
+- 新增 `SearchActivityUpdatesTest` 四个 Robolectric 用例；`test_search_updates_jvm.py` 原样提取真实 callback/adapter 方法，以明确 stub 验证通知范围，不冒充 Android 动画或真机测试。初始 RED：120 次进度使 1200 行被无条件通知；修复后 GREEN。
+- 本地已有脚本全部通过：71 个 JUnit、Storage checks、搜索返回 JVM、搜索增量 JVM、XML/集成静态契约、diff --check。
+
 ## 验证与交付
-用户已授权升版 versionCode 152 / versionName 1.52、提交推送与 GitHub Actions 编译出包；独立审查及本地回归已通过。不跑本地 Gradle/Android SDK，不在真机验收前打 tag。CI 以实际运行报告为准；键盘/主题/主页面返回/跨服务器连续播放仍待真机验收。
+用户已授权升版 versionCode 153 / versionName 1.53、提交推送与 GitHub Actions 编译出包。不跑本地 Gradle/Android SDK，不在真机验收前打 tag。CI 以实际运行报告为准；键盘/主题/主页面返回/跨服务器连续播放及无周期闪烁仍待真机验收。

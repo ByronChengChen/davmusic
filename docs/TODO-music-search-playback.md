@@ -1,4 +1,4 @@
-# 音乐搜索与播放 — 本地快照方案（v1.52 CI 交付预备）
+# 音乐搜索与播放 — 本地快照方案（v1.53 闪烁修复，未真机验收）
 
 旧的「递归扫描整台服务器、并发 3、4000 目录/10 分钟、ScanService、library_index.json」提案已被本方案替代，**不再作为待实现任务**。本次不增加扫描服务、权限、数据库或服务端私有搜索接口。
 
@@ -22,7 +22,8 @@
 - `python3 scripts/test_music_search_jvm.py`：真实生产 Java + 明示 Android host stub，JUnit 与真实文件系统共享检查；不是 Android 编译或 Robolectric。
 - `python3 scripts/check_music_search.py`：XML 解析、资源引用、manifest、播放队列/生命周期静态契约；不是 UI 实测。
 - `git diff --check`。
-- 已授权 versionCode 152 / versionName 1.52 提交推送与 GitHub Actions 出包；不跑本地 Gradle/Android SDK、不改服务、不提前打 tag。
+- 已授权 versionCode 153 / versionName 1.53 提交推送与 GitHub Actions 出包；不跑本地 Gradle/Android SDK、不改服务、不提前打 tag。
+- v1.53：移除进度/暂停的列表通知，切歌仅新旧行 payload 更新；下载完成/删除/清空事件只更新实际变更行；排序/快照/配置真实变化仍重算搜索，普通返回不重算。新增四个 Robolectric 回归与纯 JVM 通知范围检查。
 
 ## 尚待验收
 
@@ -32,4 +33,4 @@
 - [ ] 真机：跨服务器同名歌曲高亮、点击结果后连续切歌；输入/清空/退出不改队列；离线有/无下载、陈旧远端错误。
 - [ ] 真机：搜索期间刷新空目录/清空缓存/删除服务器，不能出现旧结果回写。
 
-**状态明确：v1.52 CI 交付预备，CI 结果以实际运行报告为准，真机项未验证，不宣称完成验收。**
+**状态明确：v1.53 CI 交付预备，CI 结果以实际运行报告为准，真机项（含播放期间列表不闪烁、切歌高亮、下载标记）未验证，不宣称完成验收。**

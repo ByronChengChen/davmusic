@@ -40,6 +40,14 @@ public class SearchActivity extends AppCompatActivity implements MusicPlayer.OnP
         sourceRevision.incrementAndGet();
         ui.post(() -> { if (!destroyed && controller != null) { controller.invalidate(); search(); } });
     };
+    private final Runnable downloadChanged = () -> ui.post(() -> {
+        if (!destroyed && adapter != null) adapter.refreshDownloadState();
+    });
+    private final SharedPreferences.OnSharedPreferenceChangeListener sortChanged = (prefs, key) -> {
+        if ("file_sort_mode".equals(key)) ui.post(() -> {
+            if (!destroyed && controller != null) search();
+        });
+    };
     private final SharedPreferences.OnSharedPreferenceChangeListener configChanged = (prefs, key) -> {
         if ("servers_json".equals(key)) sourceChanged.run();
     };
@@ -70,6 +78,8 @@ public class SearchActivity extends AppCompatActivity implements MusicPlayer.OnP
             }
         }, worker, command -> ui.post(command));
         cache.addSnapshotListener(sourceChanged);
+        cache.addDownloadListener(downloadChanged);
+        getSharedPreferences("player_prefs", MODE_PRIVATE).registerOnSharedPreferenceChangeListener(sortChanged);
         ServerStore.prefs(this).registerOnSharedPreferenceChangeListener(configChanged);
         findViewById(R.id.searchBack).setOnClickListener(v -> finish());
         findViewById(R.id.searchClear).setOnClickListener(v -> query.setText(""));
@@ -85,14 +95,14 @@ public class SearchActivity extends AppCompatActivity implements MusicPlayer.OnP
     private void search() {
         String text = query.getText().toString();
         // Disable stale rows immediately; clicking must capture exactly the displayed query result.
-        adapter.files = Collections.emptyList(); adapter.notifyDataSetChanged();
+        adapter.setFiles(Collections.emptyList());
         if (text.trim().isEmpty()) {
             controller.invalidate(); loading.setVisibility(View.GONE);
             status.setText(R.string.search_empty_query); return;
         }
         loading.setVisibility(View.VISIBLE); status.setText(R.string.search_loading);
         controller.search(text, TrackSorter.getMode(this), result -> {
-            adapter.files = result; adapter.notifyDataSetChanged(); loading.setVisibility(View.GONE);
+            adapter.setFiles(result); loading.setVisibility(View.GONE);
             status.setText(result.isEmpty() ? getString(R.string.search_no_results)
                     : getString(R.string.search_count, result.size()));
         });
@@ -118,7 +128,11 @@ public class SearchActivity extends AppCompatActivity implements MusicPlayer.OnP
 
     @Override protected void onResume() {
         super.onResume();
-        if (controller != null) { sourceChanged.run(); adapter.notifyDataSetChanged(); }
+        // Snapshot/config/sort listeners already invalidate their actual source changes.
+        if (adapter != null) {
+            adapter.refreshPlayingTrack(musicPlayer.getCurrentTrack());
+            adapter.refreshDownloadState();
+        }
     }
     @Override protected void onSaveInstanceState(Bundle state) {
         state.putString("query", query.getText().toString()); super.onSaveInstanceState(state);
@@ -126,40 +140,79 @@ public class SearchActivity extends AppCompatActivity implements MusicPlayer.OnP
     @Override protected void onDestroy() {
         destroyed = true;
         cache.removeSnapshotListener(sourceChanged);
+        cache.removeDownloadListener(downloadChanged);
+        getSharedPreferences("player_prefs", MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(sortChanged);
         ServerStore.prefs(this).unregisterOnSharedPreferenceChangeListener(configChanged);
         controller.close(); worker.shutdownNow(); ui.removeCallbacksAndMessages(null);
         playerBar.release(); musicPlayer.removePlaybackListener(this);
         super.onDestroy();
     }
     private void toast(String text) { Toast.makeText(this, text, Toast.LENGTH_LONG).show(); }
-    public void onTrackChanged(WebDAVFile file) { adapter.notifyDataSetChanged(); }
-    public void onPlayStateChanged(boolean playing) { adapter.notifyDataSetChanged(); }
-    public void onProgress(int position, int duration) {
-        // Refresh visible download indicators without rereading any JSON.
-        RecyclerView list = findViewById(R.id.searchResults);
-        LinearLayoutManager lm = (LinearLayoutManager) list.getLayoutManager();
-        int first = lm.findFirstVisibleItemPosition(), last = lm.findLastVisibleItemPosition();
-        if (first >= 0 && last >= first) adapter.notifyItemRangeChanged(first, last - first + 1);
-    }
+    public void onTrackChanged(WebDAVFile file) { adapter.refreshPlayingTrack(file); }
+    public void onPlayStateChanged(boolean playing) {}
+    // Progress belongs exclusively to PlayerBarController, never to result rows.
+    public void onProgress(int position, int duration) {}
     public void onPlayModeChanged(int mode) {}
     public void onError(String error) { if (!isFinishing() && hasWindowFocus()) toast(error); }
 
     private final class ResultAdapter extends RecyclerView.Adapter<ResultHolder> {
         private List<WebDAVFile> files = Collections.emptyList();
+        private String playingKey;
+        private final Map<String, Boolean> downloaded = new HashMap<>();
+        private final Object statePayload = new Object();
+
+        private void setFiles(List<WebDAVFile> result) {
+            files = result;
+            WebDAVFile current = musicPlayer.getCurrentTrack();
+            playingKey = current == null ? null : current.getCacheKey();
+            downloaded.clear();
+            for (WebDAVFile file : files) downloaded.put(file.getCacheKey(), cache.isDownloaded(file.getCacheKey()));
+            notifyDataSetChanged();
+        }
+
+        private void refreshPlayingTrack(WebDAVFile current) {
+            String nextKey = current == null ? null : current.getCacheKey();
+            if (Objects.equals(playingKey, nextKey)) return;
+            String previousKey = playingKey;
+            playingKey = nextKey;
+            for (int i = 0; i < files.size(); i++) {
+                String key = files.get(i).getCacheKey();
+                if (Objects.equals(key, previousKey) || Objects.equals(key, nextKey))
+                    notifyItemChanged(i, statePayload);
+            }
+        }
+
+        private void refreshDownloadState() {
+            for (int i = 0; i < files.size(); i++) {
+                String key = files.get(i).getCacheKey();
+                boolean value = cache.isDownloaded(key);
+                Boolean previous = downloaded.put(key, value);
+                if (previous != null && previous != value) notifyItemChanged(i, statePayload);
+                else if (previous == null && value) notifyItemChanged(i, statePayload);
+            }
+        }
+
+        @Override public void onBindViewHolder(ResultHolder holder, int position, List<Object> payloads) {
+            if (payloads.isEmpty()) onBindViewHolder(holder, position);
+            else bindState(holder, files.get(position));
+        }
+
+        private void bindState(ResultHolder holder, WebDAVFile file) {
+            boolean playing = Objects.equals(playingKey, file.getCacheKey());
+            holder.itemView.setActivated(playing);
+            holder.title.setTextColor(getResources().getColor(playing ? R.color.item_playing_text : R.color.text_primary, getTheme()));
+            holder.download.setText(cache.isDownloaded(file.getCacheKey()) ? R.string.search_downloaded : R.string.search_not_downloaded);
+        }
         @Override public ResultHolder onCreateViewHolder(ViewGroup parent, int type) {
             return new ResultHolder(LayoutInflater.from(parent.getContext()).inflate(R.layout.item_search_result, parent, false));
         }
         @Override public int getItemCount() { return files.size(); }
         @Override public void onBindViewHolder(ResultHolder holder, int position) {
             WebDAVFile file = files.get(position);
-            WebDAVFile current = musicPlayer.getCurrentTrack();
-            boolean playing = current != null && current.getCacheKey().equals(file.getCacheKey());
-            holder.itemView.setActivated(playing);
+            bindState(holder, file);
             holder.title.setText(SnapshotSearchEngine.title(file));
-            holder.title.setTextColor(getResources().getColor(playing ? R.color.item_playing_text : R.color.text_primary, getTheme()));
             String path = file.getRelativePath(); int slash = path.lastIndexOf('/');
             holder.location.setText(file.getServerName() + " · /" + (slash < 0 ? "" : path.substring(0, slash)));
-            holder.download.setText(cache.isDownloaded(file.getCacheKey()) ? R.string.search_downloaded : R.string.search_not_downloaded);
             holder.itemView.setOnClickListener(v -> play(file));
         }
     }

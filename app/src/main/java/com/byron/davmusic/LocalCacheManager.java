@@ -34,6 +34,14 @@ public class LocalCacheManager {
     private Context context;
     private SharedPreferences preferences;
     private Map<String, String> downloadMap; // remotePath -> localPath
+    private final java.util.concurrent.CopyOnWriteArrayList<Runnable> downloadListeners =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
+    public void addDownloadListener(Runnable listener) { downloadListeners.add(listener); }
+    public void removeDownloadListener(Runnable listener) { downloadListeners.remove(listener); }
+    private void downloadsChanged() {
+        // Callbacks only enqueue UI work, including when invoked by a download worker.
+        for (Runnable listener : downloadListeners) listener.run();
+    }
 
     private LocalCacheManager(Context context) {
         this.context = context.getApplicationContext();
@@ -52,7 +60,7 @@ public class LocalCacheManager {
     }
 
     // 下载文件存储管理
-    public File getLocalFile(String remotePath) {
+    public synchronized File getLocalFile(String remotePath) {
         String localPath = downloadMap.get(remotePath);
         if (localPath != null) {
             return new File(localPath);
@@ -60,7 +68,7 @@ public class LocalCacheManager {
         return null;
     }
 
-    public boolean isDownloaded(String remotePath) {
+    public synchronized boolean isDownloaded(String remotePath) {
         if (downloadMap.containsKey(remotePath)) {
             File file = new File(downloadMap.get(remotePath));
             return file.exists();
@@ -77,9 +85,10 @@ public class LocalCacheManager {
         return new File(downloadDir, fileName);
     }
 
-    public void markFileDownloaded(String remotePath, File localFile) {
+    public synchronized void markFileDownloaded(String remotePath, File localFile) {
         downloadMap.put(remotePath, localFile.getAbsolutePath());
         saveDownloadMap();
+        downloadsChanged();
     }
 
     // ---- 离线可用文件索引 ----
@@ -275,7 +284,7 @@ public class LocalCacheManager {
         return n;
     }
 
-    public void removeDownloadedFile(String remotePath) {
+    public synchronized void removeDownloadedFile(String remotePath) {
         String localPath = downloadMap.remove(remotePath);
         if (localPath != null) {
             File file = new File(localPath);
@@ -283,6 +292,7 @@ public class LocalCacheManager {
                 file.delete();
             }
             saveDownloadMap();
+            downloadsChanged();
         }
     }
 
@@ -435,6 +445,7 @@ public class LocalCacheManager {
         }
         downloadMap.clear();
         preferences.edit().remove(KEY_DOWNLOAD_MAP).apply();
+        downloadsChanged();
         
         // Same lock/epoch as publication: no half-cleared search corpus.
         clearSnapshots();
