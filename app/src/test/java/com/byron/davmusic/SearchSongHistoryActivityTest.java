@@ -31,7 +31,9 @@ public class SearchSongHistoryActivityTest {
         store = new SearchSongHistoryStore(new File(app.getFilesDir(),"search-song-history.bin")); store.clear();
         a=SearchSongHistoryChecks.song(server.getId(),"one.mp3"); b=SearchSongHistoryChecks.song(server.getId(),"two.mp3");
         store.record(a,server); store.record(b,server);
-        player=MusicPlayer.getInstance(app); player.setPlaylist(Arrays.asList(a,b),0);
+        player=MusicPlayer.getInstance(app);
+        Field media=MusicPlayer.class.getDeclaredField("mediaPlayer"); media.setAccessible(true); media.set(player,null);
+        player.setPlaylist(Arrays.asList(a,b),0);
         activity=Robolectric.buildActivity(SearchActivity.class).create().get();
         list=activity.findViewById(R.id.searchResults);
     }
