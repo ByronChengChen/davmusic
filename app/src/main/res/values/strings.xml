@@ -180,4 +180,9 @@
     <string name="search_not_downloaded">未下载 · 联网可播放</string>
     <string name="search_offline">离线模式：该歌曲未下载，无法播放。联网后可播放或先下载。</string>
     <string name="search_removed_server">该歌曲所属服务器已删除，请重新搜索</string>
+    <string name="search_history_title">最近播放 · 搜索点击历史</string>
+    <string name="search_history_empty">暂无搜索点击历史，点击搜索结果播放后会自动记录</string>
+    <string name="search_history_clear">清空历史</string>
+    <string name="search_history_delete">删除历史</string>
+    <string name="search_history_save_error">历史保存失败，不影响歌曲播放</string>
 </resources>

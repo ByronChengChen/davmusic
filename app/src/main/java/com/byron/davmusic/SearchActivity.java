@@ -33,7 +33,9 @@ public class SearchActivity extends AppCompatActivity implements MusicPlayer.OnP
     private ResultAdapter adapter;
     private EditText query;
     private TextView status;
-    private View loading;
+    private View loading, historyClear;
+    private SearchSongHistoryStore history;
+    private boolean historyMode;
     private volatile boolean destroyed;
     // May be invoked by a background snapshot publisher. Fence immediately, then schedule UI work.
     private final Runnable sourceChanged = () -> {
@@ -56,6 +58,12 @@ public class SearchActivity extends AppCompatActivity implements MusicPlayer.OnP
         super.onCreate(state);
         setContentView(R.layout.activity_search);
         cache = LocalCacheManager.getInstance(this);
+        history = new SearchSongHistoryStore(new java.io.File(getFilesDir(), "search-song-history.bin"));
+        historyClear = findViewById(R.id.searchHistoryClear);
+        historyClear.setOnClickListener(v -> {
+            if (!history.clear()) toast(getString(R.string.search_history_save_error));
+            if (historyMode) search();
+        });
         musicPlayer = MusicPlayer.getInstance(this);
         query = findViewById(R.id.searchQuery);
         status = findViewById(R.id.searchStatus);
@@ -96,12 +104,18 @@ public class SearchActivity extends AppCompatActivity implements MusicPlayer.OnP
         String text = query.getText().toString();
         // Disable stale rows immediately; clicking must capture exactly the displayed query result.
         adapter.setFiles(Collections.emptyList());
-        if (text.trim().isEmpty()) {
+        historyMode = text.trim().isEmpty();
+        historyClear.setVisibility(historyMode ? View.VISIBLE : View.GONE);
+        if (historyMode) {
             controller.invalidate(); loading.setVisibility(View.GONE);
-            status.setText(R.string.search_empty_query); return;
+            adapter.setFiles(history.list(ServerStore.list(this)));
+            historyClear.setEnabled(!adapter.files.isEmpty());
+            status.setText(adapter.files.isEmpty() ? R.string.search_history_empty : R.string.search_history_title);
+            return;
         }
         loading.setVisibility(View.VISIBLE); status.setText(R.string.search_loading);
         controller.search(text, TrackSorter.getMode(this), result -> {
+            if (destroyed || historyMode || query.getText().toString().trim().isEmpty()) return;
             adapter.setFiles(result); loading.setVisibility(View.GONE);
             status.setText(result.isEmpty() ? getString(R.string.search_no_results)
                     : getString(R.string.search_count, result.size()));
@@ -109,27 +123,32 @@ public class SearchActivity extends AppCompatActivity implements MusicPlayer.OnP
     }
 
     private void play(WebDAVFile file) {
-        boolean configured = false;
-        for (ServerProfile server : ServerStore.list(this))
-            if (server.getId().equals(file.getServerId())) { configured = true; break; }
-        if (!configured) { toast(getString(R.string.search_removed_server)); sourceChanged.run(); return; }
+        List<ServerProfile> servers = ServerStore.list(this);
+        ServerProfile owner = null;
+        for (ServerProfile server : servers)
+            if (server.getId().equals(file.getServerId()) && server.isComplete()) { owner = server; break; }
+        if (historyMode) file = history.resolve(file, servers);
+        if (owner == null || file == null) { toast(getString(R.string.search_removed_server)); sourceChanged.run(); return; }
         if (!NetworkUtils.isNetworkConnected(this) && !cache.isDownloaded(file.getCacheKey())) {
             toast(getString(R.string.search_offline)); return;
         }
-        List<WebDAVFile> queue = new ArrayList<>(adapter.files);
+        List<WebDAVFile> queue = historyMode ? Collections.singletonList(file) : new ArrayList<>(adapter.files);
         int index = -1;
         for (int i = 0; i < queue.size(); i++)
             if (queue.get(i).getCacheKey().equals(file.getCacheKey())) { index = i; break; }
         if (index < 0) return;
+        if (!history.record(file, owner)) toast(getString(R.string.search_history_save_error));
         musicPlayer.setPlaylist(queue, index);
         musicPlayer.playFile(file);
         MusicService.start(this);
+        if (historyMode) search();
     }
 
     @Override protected void onResume() {
         super.onResume();
         // Snapshot/config/sort listeners already invalidate their actual source changes.
         if (adapter != null) {
+            if (historyMode) search();
             adapter.refreshPlayingTrack(musicPlayer.getCurrentTrack());
             adapter.refreshDownloadState();
         }
@@ -213,14 +232,25 @@ public class SearchActivity extends AppCompatActivity implements MusicPlayer.OnP
             holder.title.setText(SnapshotSearchEngine.title(file));
             String path = file.getRelativePath(); int slash = path.lastIndexOf('/');
             holder.location.setText(file.getServerName() + " · /" + (slash < 0 ? "" : path.substring(0, slash)));
-            holder.itemView.setOnClickListener(v -> play(file));
+            final boolean boundHistory = historyMode;
+            holder.itemView.setOnClickListener(v -> {
+                if (boundHistory == historyMode && adapter.files.contains(file)) play(file);
+            });
+            holder.remove.setVisibility(boundHistory ? View.VISIBLE : View.GONE);
+            holder.remove.setOnClickListener(v -> {
+                if (!historyMode || !boundHistory) return;
+                if (!history.remove(file)) toast(getString(R.string.search_history_save_error));
+                search();
+            });
         }
     }
     private static final class ResultHolder extends RecyclerView.ViewHolder {
         final TextView title, location, download;
+        final View remove;
         ResultHolder(View view) {
             super(view); title = view.findViewById(R.id.searchSongTitle);
             location = view.findViewById(R.id.searchSongLocation); download = view.findViewById(R.id.searchSongDownload);
+            remove = view.findViewById(R.id.searchHistoryDelete);
         }
     }
 }

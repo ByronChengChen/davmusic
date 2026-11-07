@@ -24,7 +24,8 @@ def original(path):
 def tree_contract(node):
     return (node.tag, sorted((k, v) for k, v in node.attrib.items()
                             if k.split('}')[-1] not in VISUAL),
-            [tree_contract(c) for c in node])
+            [tree_contract(c) for c in node
+             if c.get(A+'id') not in {'@+id/searchHistoryClear', '@+id/searchHistoryDelete'}])
 
 
 def colors(folder):
@@ -91,6 +92,16 @@ class VisualRefreshContracts(unittest.TestCase):
                     self.assertEqual(tree_contract(ET.fromstring(original(str(p.relative_to(ROOT))))),
                                      tree_contract(ET.parse(p).getroot()))
 
+    def test_existing_strings_preserved_with_only_approved_history_additions(self):
+        p = 'app/src/main/res/values/strings.xml'
+        before = {e.get('name'): (e.tag, dict(e.attrib), e.text) for e in ET.fromstring(original(p))}
+        after = {e.get('name'): (e.tag, dict(e.attrib), e.text) for e in ET.parse(ROOT / p).getroot()}
+        added = {'search_history_title', 'search_history_empty', 'search_history_clear',
+                 'search_history_delete', 'search_history_save_error'}
+        self.assertEqual(added, set(after) - set(before))
+        for name, value in before.items():
+            self.assertEqual(value, after[name], name)
+
     def test_every_light_color_has_night_value(self):
         self.assertEqual(set(colors('values')), set(colors('values-night')))
 
@@ -111,10 +122,13 @@ class VisualRefreshContracts(unittest.TestCase):
                     self.assertGreaterEqual(contrast(c[fg], c[bg]), 4.5)
 
     def test_protected_files_and_nonvisual_java_unchanged(self):
-        for path in ['AGENTS.md', 'app/src/main/AndroidManifest.xml',
-                     'app/src/main/res/values/strings.xml', '.github/workflows/build.yml']:
+        # v1.56 explicitly adds history strings and SearchActivity behavior; all other
+        # original surfaces remain protected by the visual-refresh baseline.
+        for path in ['AGENTS.md', 'app/src/main/AndroidManifest.xml', '.github/workflows/build.yml']:
             self.assertEqual(original(path), (ROOT / path).read_bytes(), path)
         for p in (ROOT/'app/src/main/java').rglob('*.java'):
+            if p.name in {'SearchActivity.java', 'SearchSongHistoryStore.java'}:
+                continue  # Real behavior coverage: SearchSongHistoryActivityTest/StoreTest.
             before = original(str(p.relative_to(ROOT))).decode()
             after = p.read_text()
             if p.name == 'MainActivity.java':
@@ -127,7 +141,7 @@ class VisualRefreshContracts(unittest.TestCase):
 
     def test_version_only_gradle_change(self):
         p = 'app/build.gradle'
-        expected = original(p).decode().replace('versionCode 153', 'versionCode 155').replace('versionName "1.53"', 'versionName "1.55"')
+        expected = original(p).decode().replace('versionCode 153', 'versionCode 156').replace('versionName "1.53"', 'versionName "1.56"')
         self.assertEqual(expected, (ROOT/p).read_text())
 
     def test_lyrics_no_fixed_blue(self):

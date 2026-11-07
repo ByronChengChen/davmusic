@@ -9,4 +9,6 @@
         android:textSize="12sp" android:textColor="@color/text_secondary" />
     <TextView android:id="@+id/searchSongDownload" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:textSize="12sp" android:textColor="@color/text_secondary" />
+    <Button android:id="@+id/searchHistoryDelete" android:layout_width="wrap_content" android:layout_height="48dp"
+        android:layout_gravity="end" android:text="@string/search_history_delete" android:visibility="gone" />
 </LinearLayout>
