@@ -27,12 +27,13 @@ constants = '\n'.join(re.findall(r'    private static final String STATE_.*?;', 
 program = r'''
 import java.util.*;
 @interface NonNull {}
-class Bundle extends HashMap<String,Object> {
+class Bundle extends HashMap<String,Object> implements android.os.Parcelable {
  void putString(String k,String v){put(k,v);} String getString(String k,String d){return (String)getOrDefault(k,d);}
  void putStringArrayList(String k,ArrayList<String> v){put(k,v);} @SuppressWarnings("unchecked") ArrayList<String> getStringArrayList(String k){return (ArrayList<String>)get(k);}
+ void putParcelableArrayList(String k,ArrayList<Bundle> v){put(k,v);} @SuppressWarnings("unchecked") ArrayList<Bundle> getParcelableArrayList(String k){return (ArrayList<Bundle>)get(k);}
  void putBoolean(String k,boolean v){put(k,v);} boolean getBoolean(String k,boolean d){return (boolean)getOrDefault(k,d);}
  void putInt(String k,int v){put(k,v);} int getInt(String k,int d){return (int)getOrDefault(k,d);}
- void putParcelable(String k,android.os.Parcelable v){put(k,v);} android.os.Parcelable getParcelable(String k){return (android.os.Parcelable)get(k);}
+ void putParcelable(String k,android.os.Parcelable v){put(k,v);} @SuppressWarnings("unchecked") <T extends android.os.Parcelable> T getParcelable(String k){return (T)get(k);}
 }
 class Base {protected void onSaveInstanceState(Bundle b){}}
 public class ReturnHarness extends Base {
@@ -53,6 +54,7 @@ public class ReturnHarness extends Base {
  Logger rlog;String currentPath="/";ArrayDeque<String> pathStack=new ArrayDeque<>();
  boolean isOfflineMode,returningFromSearch; ServerProfile currentServer;
  android.os.Parcelable searchReturnState;Bundle pendingScrollState;
+ final java.util.List<Bundle> parentScrollStates=new java.util.ArrayList<>();Bundle serverRootScrollState;
  Recycler recyclerView=new Recycler();Adapter fileListAdapter=new Adapter();
  Set<String> servers=new HashSet<>(Arrays.asList("a","b"));
  ServerProfile findServerById(String id){return servers.contains(id)?new ServerProfile(id):null;}

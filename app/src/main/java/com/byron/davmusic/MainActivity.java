@@ -93,6 +93,9 @@ public class MainActivity extends AppCompatActivity implements
     private android.os.Parcelable searchReturnState;
     private boolean returningFromSearch;
     private Bundle pendingScrollState;
+    // Only active ancestors are retained: backing out consumes one entry, not a history cache.
+    private final List<Bundle> parentScrollStates = new ArrayList<>();
+    private Bundle serverRootScrollState;
     private boolean isSeeking = false;   // 用户正在拖动进度条时，暂停自动刷新
 
     /**
@@ -455,6 +458,9 @@ public class MainActivity extends AppCompatActivity implements
         if (rlog != null) {
             rlog.i(TAG, "进入服务器: " + profile.getDisplayName() + " (" + profile.getUrl() + ")");
         }
+        if (currentServer == null) serverRootScrollState = captureScrollState();
+        resetPendingScroll();
+        parentScrollStates.clear();
         currentServer = profile;
         // 换服务器时必须重置导航状态与请求序号，避免旧服务器的
         // 异步回调回来把列表覆盖成另一台的内容
@@ -469,9 +475,13 @@ public class MainActivity extends AppCompatActivity implements
 
     /** 回到根目录（服务器列表） */
     private void exitToServerRoot() {
+        resetPendingScroll();
+        parentScrollStates.clear();
         currentServer = null;
         pathStack.clear();
         currentPath = "/";
+        pendingScrollState = serverRootScrollState;
+        serverRootScrollState = null;
         loadToken++;        // 作废在途请求
         loadCurrentPath();
     }
@@ -745,11 +755,8 @@ public class MainActivity extends AppCompatActivity implements
         // 若下面命中快照会立刻重新填充。
         fileListAdapter.setFiles(new ArrayList<>());
 
-        // 切换目录后把列表滚回顶部。
-        // 否则 RecyclerView 会保留上一个目录的滚动偏移，导致新目录的
-        // 前几项被顶出视野 —— 用户会以为"某个目录消失了"
-        // （实测：从子目录返回后，列表停在中间，前 7 项不可见）。
-        if (recyclerView != null) {
+        // New directories start at top; returning parents wait for matching adapter data.
+        if (recyclerView != null && pendingScrollState == null) {
             recyclerView.scrollToPosition(0);
         }
 
@@ -1166,6 +1173,8 @@ public class MainActivity extends AppCompatActivity implements
         }
 
         // 保存当前路径到栈，供返回时恢复
+        parentScrollStates.add(captureScrollState());
+        resetPendingScroll();
         pathStack.add(currentPath);
 
         // 直接使用解析阶段得到的相对路径（已剥离 baseUrl 前缀并 URL 解码），
@@ -1214,6 +1223,7 @@ public class MainActivity extends AppCompatActivity implements
         } else {
             // 从栈中取出上一个路径
             currentPath = pathStack.remove(pathStack.size() - 1);
+            restoreParentScroll();
             if (rlog != null) rlog.i(TAG, "返回后 currentPath=" + currentPath);
             loadCurrentPath();
         }
@@ -2565,6 +2575,36 @@ public class MainActivity extends AppCompatActivity implements
     // currentPath 会退回 "/"，用户看到的就是"切回前台回到首页"。
     // 把导航状态存进 savedInstanceState 即可原位恢复。
 
+    private Bundle captureScrollState() {
+        // Preserve a restore that has not reached layout yet, including its pixel offset.
+        if (pendingScrollState != null) return pendingScrollState;
+        Bundle state = new Bundle();
+        state.putString(STATE_SERVER_ID, currentServer == null ? null : currentServer.getId());
+        state.putString(STATE_CURRENT_PATH, currentPath);
+        if (recyclerView != null && recyclerView.getLayoutManager() != null) {
+            state.putParcelable(STATE_LAYOUT, searchReturnState != null ? searchReturnState
+                    : recyclerView.getLayoutManager().onSaveInstanceState());
+            state.putInt(STATE_SCROLL, ((LinearLayoutManager) recyclerView.getLayoutManager())
+                    .findFirstVisibleItemPosition());
+        }
+        return state;
+    }
+
+    private void resetPendingScroll() {
+        pendingScrollState = null; // Also invalidates callbacks already posted to RecyclerView.
+        searchReturnState = null;
+        returningFromSearch = false;
+    }
+
+    private void restoreParentScroll() {
+        resetPendingScroll();
+        if (!parentScrollStates.isEmpty()) {
+            pendingScrollState = parentScrollStates.remove(parentScrollStates.size() - 1);
+        }
+    }
+
+    private static final String STATE_PARENT_SCROLLS = "state_parent_scrolls";
+    private static final String STATE_SERVER_ROOT_SCROLL = "state_server_root_scroll";
     private static final String STATE_CURRENT_PATH = "state_current_path";
     private static final String STATE_PATH_STACK = "state_path_stack";
     private static final String STATE_OFFLINE = "state_offline_mode";
@@ -2579,6 +2619,8 @@ public class MainActivity extends AppCompatActivity implements
         if (rlog != null) rlog.i(TAG, "onSaveInstanceState: path=" + currentPath);
         outState.putString(STATE_CURRENT_PATH, currentPath);
         outState.putStringArrayList(STATE_PATH_STACK, new ArrayList<>(pathStack));
+        outState.putParcelableArrayList(STATE_PARENT_SCROLLS, new ArrayList<>(parentScrollStates));
+        outState.putParcelable(STATE_SERVER_ROOT_SCROLL, serverRootScrollState);
         outState.putBoolean(STATE_OFFLINE, isOfflineMode);
         outState.putString(STATE_SERVER_ID, currentServer == null ? null : currentServer.getId());
         outState.putBoolean(STATE_SEARCH_RETURN, returningFromSearch);
@@ -2605,6 +2647,8 @@ public class MainActivity extends AppCompatActivity implements
         returningFromSearch = false;
         searchReturnState = null;
         pendingScrollState = null;
+        parentScrollStates.clear();
+        serverRootScrollState = null;
         // 删除的服务器不可借用另一台服务器的相同路径或滚动位置。
         if (serverId != null && currentServer == null) return false;
 
@@ -2613,6 +2657,14 @@ public class MainActivity extends AppCompatActivity implements
             if (savedPath != null && !savedPath.isEmpty()) currentPath = savedPath;
             ArrayList<String> savedStack = savedInstanceState.getStringArrayList(STATE_PATH_STACK);
             if (savedStack != null) pathStack.addAll(savedStack);
+            ArrayList<Bundle> savedScrolls = savedInstanceState.getParcelableArrayList(STATE_PARENT_SCROLLS);
+            // Ignore inconsistent/legacy histories rather than restoring another ancestor's offset.
+            if (savedScrolls != null && savedScrolls.size() == pathStack.size()) {
+                parentScrollStates.addAll(savedScrolls);
+            } else {
+                for (int i = 0; i < pathStack.size(); i++) parentScrollStates.add(null);
+            }
+            serverRootScrollState = savedInstanceState.getParcelable(STATE_SERVER_ROOT_SCROLL);
         }
         isOfflineMode = savedInstanceState.getBoolean(STATE_OFFLINE, false);
         returningFromSearch = savedInstanceState.getBoolean(STATE_SEARCH_RETURN, false);
@@ -2663,16 +2715,13 @@ public class MainActivity extends AppCompatActivity implements
     /**
      * 把内容滚动到上次位置。
      *
-     * 仅在 Activity 被系统回收后重建时使用（savedInstanceState 非空）。
+     * 用于两种场景：Activity 被系统回收后重建；以及从子目录返回到父目录。
+     * 新建目录（进入下一层、进入服务器）仍然从顶部开始。
      *
      * 关键约束：必须在【数据已经灌入适配器之后】才能 scrollToPosition。
      * 原实现放在 onCreate 里，此时列表还是空的 —— 滚动请求落空，
      * 等异步数据到达后 RecyclerView 行为不确定（可能保留偏移、
      * 也可能跳回顶部），表现为"条目时有时无"。
-     *
-     * 另外注意：目录切换（进入/返回）不应该滚动 —— 那会让用户
-     * 误以为某个条目"消失"（实际只是被滚出视野）。只有 Activity
-     * 重建这一种场景才需要恢复滚动位置。
      */
     private void restoreScrollPos(Bundle savedInstanceState) {
         if (savedInstanceState == null || pendingScrollState != savedInstanceState

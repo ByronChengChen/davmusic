@@ -721,6 +721,15 @@
 - THE SYSTEM SHALL 原子保存最少身份元数据，使用当前有效配置；删除/失效/账户根路径变化时安全过滤，不用旧凭据或 URL，不网络预检、不重试。
 - 完整需求/设计/测试边界见 `../search-song-history/requirements.md` 与 `design.md`。
 
+### 3.18 目录返回位置与历史行布局（R18，v1.57，真机待验收）
+
+- WHEN 用户从子目录返回父目录或服务器列表，THE SYSTEM SHALL 在对应列表数据到达后恢复返回前的首个可见项与像素偏移，不回到顶部。
+- WHEN 进入新目录或进入服务器，THE SYSTEM SHALL 从顶部显示。
+- THE SYSTEM SHALL 按服务器 ID 与路径隔离滚动状态，丢弃跨导航的迟到恢复回调；Activity 重建后逐级返回仍恢复各自位置，旧版本状态或祖先数量不一致时安全回退顶部。
+- WHEN 搜索页显示最近播放历史，THE SYSTEM SHALL 将单条删除按钮置于文字右侧同一行，保留 48dp 触摸高度与独立删除点击；不改变播放、队列与下载。
+- 完整需求/设计与验证边界见 `../directory-return-and-history-layout/requirements.md` 与 `design.md`。
+- 远端重命名/移动仍为范围外（R18 不含重命名）。
+
 ## 4. 非功能需求
 
 **N1 网络超时**

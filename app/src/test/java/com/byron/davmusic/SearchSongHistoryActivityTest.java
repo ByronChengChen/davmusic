@@ -44,6 +44,20 @@ public class SearchSongHistoryActivityTest {
         RecyclerView.Adapter adapter=list.getAdapter(); RecyclerView.ViewHolder h=adapter.createViewHolder(list,adapter.getItemViewType(position)); adapter.bindViewHolder(h,position); return h;
     }
     private void assertQueueUnchanged() { assertEquals(2,player.getPlaylist().size()); assertEquals(a.getCacheKey(),player.getCurrentTrack().getCacheKey()); }
+    @Test public void historyDeleteSharesTextHeightInsteadOfAddingAnotherRow() {
+        View item = row(0).itemView;
+        int width = (int) (360 * activity.getResources().getDisplayMetrics().density);
+        item.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+        item.layout(0, 0, width, item.getMeasuredHeight());
+        View delete = item.findViewById(R.id.searchHistoryDelete);
+        View text = (View) item.findViewById(R.id.searchSongTitle).getParent();
+        assertTrue("delete stays to the right of text", delete.getLeft() >= text.getRight());
+        assertTrue("delete overlaps text vertically", delete.getTop() < text.getBottom()
+                && text.getTop() < delete.getBottom());
+        assertEquals(item.getPaddingTop() + Math.max(text.getMeasuredHeight(), delete.getMeasuredHeight())
+                + item.getPaddingBottom(), item.getMeasuredHeight());
+    }
     @Test public void emptyQueryShowsRecentSongWidgetsAndNotKeywordHistory() {
         assertEquals(2,list.getAdapter().getItemCount()); assertEquals(View.VISIBLE,control("searchHistoryClear").getVisibility());
         assertQueueUnchanged();

@@ -89,6 +89,17 @@ class VisualRefreshContracts(unittest.TestCase):
         for folder in ['layout', 'menu']:
             for p in (RES / folder).glob('*.xml'):
                 with self.subTest(file=p.name):
+                    if p.name == 'item_search_result.xml':
+                        # v1.57 explicitly approves moving delete beside the text.
+                        # Keep the original text widgets/attributes intact; new geometry
+                        # is checked by test_search_history_layout + Robolectric.
+                        before = ET.fromstring(original(str(p.relative_to(ROOT))))
+                        after = ET.parse(p).getroot()
+                        for old in before.iter('TextView'):
+                            current = next(e for e in after.iter('TextView')
+                                           if e.get(A+'id') == old.get(A+'id'))
+                            self.assertEqual(tree_contract(old), tree_contract(current))
+                        continue
                     self.assertEqual(tree_contract(ET.fromstring(original(str(p.relative_to(ROOT))))),
                                      tree_contract(ET.parse(p).getroot()))
 
@@ -127,6 +138,10 @@ class VisualRefreshContracts(unittest.TestCase):
         for path in ['AGENTS.md', 'app/src/main/AndroidManifest.xml', '.github/workflows/build.yml']:
             self.assertEqual(original(path), (ROOT / path).read_bytes(), path)
         for p in (ROOT/'app/src/main/java').rglob('*.java'):
+            if p.name == 'MainActivity.java':
+                # v1.57 explicitly changes navigation; covered by the navigation
+                # harness, existing search-return suite, CI and focused diff review.
+                continue
             if p.name in {'SearchActivity.java', 'SearchSongHistoryStore.java'}:
                 continue  # Real behavior coverage: SearchSongHistoryActivityTest/StoreTest.
             before = original(str(p.relative_to(ROOT))).decode()
@@ -141,7 +156,7 @@ class VisualRefreshContracts(unittest.TestCase):
 
     def test_version_only_gradle_change(self):
         p = 'app/build.gradle'
-        expected = original(p).decode().replace('versionCode 153', 'versionCode 156').replace('versionName "1.53"', 'versionName "1.56"')
+        expected = original(p).decode().replace('versionCode 153', 'versionCode 157').replace('versionName "1.53"', 'versionName "1.57"')
         self.assertEqual(expected, (ROOT/p).read_text())
 
     def test_lyrics_no_fixed_blue(self):
