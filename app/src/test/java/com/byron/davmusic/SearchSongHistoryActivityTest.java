@@ -84,7 +84,29 @@ public class SearchSongHistoryActivityTest {
         // Actual controller worker queues delivery; switching to empty invalidates its ticket.
         ((EditText)activity.findViewById(R.id.searchQuery)).setText("one");
         activity.findViewById(R.id.searchClear).performClick();
-        Thread.sleep(150); idle(); assertEquals(2,list.getAdapter().getItemCount()); assertQueueUnchanged();
+        Field wf=SearchActivity.class.getDeclaredField("worker"); wf.setAccessible(true);
+        ((java.util.concurrent.ExecutorService)wf.get(activity)).submit(() -> {}).get(5,java.util.concurrent.TimeUnit.SECONDS);
+        idle(); assertEquals(2,list.getAdapter().getItemCount()); assertQueueUnchanged();
+    }
+    @Test public void recreationRetainsHistoryWithoutChangingQueue() {
+        android.os.Bundle state=new android.os.Bundle(); activity.onSaveInstanceState(state);
+        activity.onDestroy();
+        activity=Robolectric.buildActivity(SearchActivity.class).create(state).get();
+        list=activity.findViewById(R.id.searchResults);
+        assertEquals(2,list.getAdapter().getItemCount()); assertQueueUnchanged();
+    }
+    @Test public void deletingHistoryDoesNotResetActiveAudioInstancePositionOrPlayState() throws Exception {
+        File local=File.createTempFile("history-active",".mp3",activity.getCacheDir());
+        LocalCacheManager.getInstance(activity).markFileDownloaded(a.getCacheKey(),local); idle();
+        row(1).itemView.performClick(); idle();
+        Field mediaField=MusicPlayer.class.getDeclaredField("mediaPlayer"); mediaField.setAccessible(true);
+        android.media.MediaPlayer media=(android.media.MediaPlayer)mediaField.get(player);
+        assertNotNull(media); media.seekTo(15000); idle();
+        int position=player.getCurrentPosition(); boolean playing=player.isPlaying();
+        int delete=activity.getResources().getIdentifier("searchHistoryDelete","id",activity.getPackageName());
+        row(0).itemView.findViewById(delete).performClick(); control("searchHistoryClear").performClick();
+        assertSame(media,mediaField.get(player)); assertEquals(position,player.getCurrentPosition()); assertEquals(playing,player.isPlaying());
+        assertEquals(1,player.getPlaylist().size()); assertEquals(a.getCacheKey(),player.getCurrentTrack().getCacheKey());
     }
     @Test public void searchResultClickStillCapturesFullDisplayedQueue() throws Exception {
         ((EditText)activity.findViewById(R.id.searchQuery)).setText("one");

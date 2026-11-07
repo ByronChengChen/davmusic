@@ -8,7 +8,7 @@ import java.util.*;
 final class SearchSongHistoryStore {
     private static final int MAGIC = 0x444d4801;
     private static final int LIMIT = 50;
-    private static final long MAX_BYTES = 512 * 1024;
+    private static final long MAX_BYTES = 1024 * 1024;
     private final File target;
     SearchSongHistoryStore(File target) { this.target = target; }
     private static final class Entry {
@@ -51,6 +51,21 @@ final class SearchSongHistoryStore {
             return true;
         } catch (IOException | RuntimeException ignored) { return false; }
     }
+    // Exact root/account digest: ServerProfile.getScopeId lowercases URL paths,
+    // which would conflate case-sensitive WebDAV roots. Never include the password.
+    private static String scope(ServerProfile server) {
+        try {
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            for (String value : new String[]{server.getUrl(), server.getUsername()}) {
+                byte[] bytes = (value == null ? "" : value).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                digest.update(java.nio.ByteBuffer.allocate(4).putInt(bytes.length).array());
+                digest.update(bytes);
+            }
+            StringBuilder hex = new StringBuilder();
+            for (byte b : digest.digest()) hex.append(String.format(java.util.Locale.ROOT, "%02x", b & 255));
+            return hex.toString();
+        } catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+    }
     private static boolean valid(String id, String path) {
         if (id == null || id.isEmpty() || id.length() > 256 || path == null || path.isEmpty()
                 || path.length() > 2048 || path.startsWith("/") || path.contains("\\")) return false;
@@ -67,7 +82,7 @@ final class SearchSongHistoryStore {
             List<Entry> entries = read();
             entries.removeIf(e -> e.id.equals(f.getServerId()) && e.path.equals(f.getRelativePath()));
             entries.add(0, new Entry(f.getServerId(), f.getRelativePath(), f.getDisplayName(),
-                    f.getContentType() != null && f.getContentType().startsWith("audio/") ? "audio/*" : "", server.getScopeId()));
+                    f.getContentType() != null && f.getContentType().startsWith("audio/") ? "audio/*" : "", scope(server)));
             while (entries.size() > LIMIT) entries.remove(entries.size() - 1);
             return write(entries);
         }
@@ -76,7 +91,7 @@ final class SearchSongHistoryStore {
         synchronized (SearchSongHistoryStore.class) {
             List<WebDAVFile> files = new ArrayList<>();
             for (Entry e : read()) for (ServerProfile server : servers)
-                if (e.id.equals(server.getId()) && server.isComplete() && e.scope.equals(server.getScopeId())) {
+                if (e.id.equals(server.getId()) && server.isComplete() && e.scope.equals(scope(server))) {
                     files.add(e.file(server)); break;
                 }
             return files;

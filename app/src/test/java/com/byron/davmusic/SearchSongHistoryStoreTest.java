@@ -34,6 +34,10 @@ public class SearchSongHistoryStoreTest {
         record("a","one.mp3"); record("b","one.mp3"); assertEquals(2,list().size());
         assertTrue(store.remove(list().get(0))); assertEquals("a",list().get(0).getServerId());
     }
+    @Test public void caseSensitiveRootChangeMustNotResolveOldSong() {
+        a.setUrl("https://a.invalid/dav/Music/"); record("a","one.mp3");
+        a.setUrl("https://a.invalid/dav/music/"); assertTrue(list().isEmpty());
+    }
     @Test public void removedIncompleteOrChangedAccountIsFiltered() {
         record("a","one.mp3"); assertTrue(store.list(Collections.singletonList(b)).isEmpty());
         a.setPassword(""); assertTrue(list().isEmpty()); a.setPassword("new-password"); assertEquals(1,list().size());
@@ -48,7 +52,7 @@ public class SearchSongHistoryStoreTest {
     }
     @Test public void corruptAndOversizedFilesFailClosed() throws Exception {
         Files.write(target.toPath(),new byte[]{1,2,3}); assertTrue(list().isEmpty());
-        Files.write(target.toPath(),new byte[524289]); assertTrue(list().isEmpty());
+        Files.write(target.toPath(),new byte[1048577]); assertTrue(list().isEmpty());
         record("a","new.mp3"); assertEquals(1,list().size());
     }
     @Test public void unsafePathsAndNonAudioAreNotRecorded() {
@@ -61,6 +65,14 @@ public class SearchSongHistoryStoreTest {
         try { AtomicSnapshotWriter.write(target,out->{out.write(1); throw new IOException("injected");}); fail(); }
         catch(IOException expected) { assertArrayEquals(before,Files.readAllBytes(target.toPath())); }
         assertEquals(1,list().size()); assertEquals(1,dir.listFiles().length);
+    }
+    @Test public void boundedUnicodeMetadataRemainsReadableAfterFiftyWrites() {
+        String longName = String.join("", Collections.nCopies(1900,"歌")) + ".mp3";
+        for(int i=0;i<50;i++) {
+            WebDAVFile f=SearchSongHistoryChecks.song("a",i+"/"+longName); f.setDisplayName(longName);
+            assertTrue(store.record(f,a));
+        }
+        assertEquals(50,list().size()); assertTrue(target.length()<=1048576);
     }
     @Test public void unwritableDestinationReturnsFailureWithoutThrowing() {
         SearchSongHistoryStore bad = new SearchSongHistoryStore(new File(new File(dir,"missing"),"history"));
