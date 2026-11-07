@@ -90,6 +90,9 @@ public class MainActivity extends AppCompatActivity implements
      */
     private ServerProfile currentServer;
     private boolean isOfflineMode = false;
+    private android.os.Parcelable searchReturnState;
+    private boolean returningFromSearch;
+    private Bundle pendingScrollState;
     private boolean isSeeking = false;   // 用户正在拖动进度条时，暂停自动刷新
 
     /**
@@ -267,16 +270,13 @@ public class MainActivity extends AppCompatActivity implements
         // 恢复上次的导航位置（Activity 被系统回收后重建时，
         // 若不恢复会退回根目录，表现为"切回前台回到首页"）
         boolean restored = restoreNavState(savedInstanceState);
-
-        // 加载当前路径（restored 时 currentPath 已指向上次所在目录）
+        // 数据到达后恢复，而非猜测网络能在 300ms 内完成。空列表不消费状态。
+        fileListAdapter.registerAdapterDataObserver(new RecyclerView.AdapterDataObserver() {
+            @Override public void onChanged() {
+                restoreScrollPos(pendingScrollState);
+            }
+        });
         loadCurrentPath();
-
-        // 恢复滚动位置。必须在【数据灌入适配器之后】执行 —— 这里延迟
-        // 300ms 作为兜底，且 restoreScrollPos 内部还会校验项数是否足够。
-        // 只在 Activity 重建（savedInstanceState 非空）时才有意义。
-        if (savedInstanceState != null) {
-            mainHandler.postDelayed(() -> restoreScrollPos(savedInstanceState), 300);
-        }
 
         // 若此前已在播放（服务仍在运行），确保前台服务处于活动状态。
         // 这样即便 Activity 被回收重建，保活链条也不会断。
@@ -702,6 +702,13 @@ public class MainActivity extends AppCompatActivity implements
      * 表现为"同一文件夹不同时间进去内容还不一样"。
      */
     private void loadCurrentPath() {
+        if (pendingScrollState != null
+                && (!java.util.Objects.equals(pendingScrollState.getString(STATE_SERVER_ID, null),
+                        currentServer == null ? null : currentServer.getId())
+                    || !java.util.Objects.equals(pendingScrollState.getString(STATE_CURRENT_PATH, "/"), currentPath))) {
+            pendingScrollState = null;
+            searchReturnState = null;
+        }
         // 【根目录 = 服务器列表】
         // 这是「服务器即根目录」的入口：根目录不请求任何 WebDAV，
         // 直接把已保存的服务器当作「文件夹」列出来，点进去才是那台
@@ -912,6 +919,7 @@ public class MainActivity extends AppCompatActivity implements
         // 回来时就会把 A 的内容写进 B 的缓存 —— 必须捕获当时的那个。
         final ServerProfile serverAtRequest = currentServer;
         final String cacheKey = cacheKeyOf(serverAtRequest, requestPath);
+        final long snapshotEpoch = cacheManager.getSnapshotEpoch();
 
         executorService.execute(() -> {
             clientFor(serverAtRequest).listFolder(requestPath,
@@ -925,6 +933,7 @@ public class MainActivity extends AppCompatActivity implements
                         Log.d(TAG, "丢弃过期的加载结果: " + requestPath);
                         return;
                     }
+                    if (snapshotEpoch != cacheManager.getSnapshotEpoch()) return;
                     // 更新文件的下载状态
                     updateFileDownloadStates(files);
 
@@ -945,13 +954,14 @@ public class MainActivity extends AppCompatActivity implements
                     //
                     // cacheKey 里含服务器 id，两台服务器同名目录互不覆盖。
                     if (files != null) {
-                        cacheManager.saveSnapshot(cacheKey, files);
-                        // 同步写入内存缓存，后续"返回上级"可零请求命中
-                        putDirCache(cacheKey, files);
+                        cacheManager.saveSnapshotIfCurrent(cacheKey, files, snapshotEpoch);
+                        // Memory publication is fenced again on the UI thread below.
                     }
 
                     // 更新 UI
                     mainHandler.post(() -> {
+                        if (token != loadToken || snapshotEpoch != cacheManager.getSnapshotEpoch()) return;
+                        if (files != null) putDirCache(cacheKey, files);
                         dismissLoading();
                         fileListAdapter.setFiles(files);
                         fileListAdapter.setOfflineMode(false);
@@ -2242,7 +2252,12 @@ public class MainActivity extends AppCompatActivity implements
     public boolean onOptionsItemSelected(@NonNull MenuItem item) {
         int id = item.getItemId();
         
-        if (id == R.id.menu_new_folder) {
+        if (id == R.id.menu_search) {
+            searchReturnState = recyclerView.getLayoutManager().onSaveInstanceState();
+            returningFromSearch = true;
+            startActivity(new Intent(this, SearchActivity.class));
+            return true;
+        } else if (id == R.id.menu_new_folder) {
             // 新建文件夹：在当前服务器的当前目录下发 MKCOL（直接落到服务器上）
             showNewFolderDialog();
             return true;
@@ -2301,8 +2316,10 @@ public class MainActivity extends AppCompatActivity implements
     private void clearCache() {
         new AlertDialog.Builder(this)
                 .setTitle("清空缓存")
-                .setMessage("确定要清空所有缓存数据吗？")
+                .setMessage("确定要清空所有缓存数据吗？本地目录快照及歌曲搜索结果也将清除。")
                 .setPositiveButton("清空", (dialog, which) -> {
+                    loadToken++;
+                    clearDirCache();
                     cacheManager.clearAllCache();
                     fileListAdapter.setFiles(new ArrayList<>());
                     toast("缓存已清空", Toast.LENGTH_SHORT);
@@ -2552,6 +2569,9 @@ public class MainActivity extends AppCompatActivity implements
     private static final String STATE_PATH_STACK = "state_path_stack";
     private static final String STATE_OFFLINE = "state_offline_mode";
     private static final String STATE_SCROLL = "state_scroll_pos";
+    private static final String STATE_SERVER_ID = "state_server_id";
+    private static final String STATE_SEARCH_RETURN = "state_search_return";
+    private static final String STATE_LAYOUT = "state_layout";
 
     @Override
     protected void onSaveInstanceState(@NonNull Bundle outState) {
@@ -2560,10 +2580,17 @@ public class MainActivity extends AppCompatActivity implements
         outState.putString(STATE_CURRENT_PATH, currentPath);
         outState.putStringArrayList(STATE_PATH_STACK, new ArrayList<>(pathStack));
         outState.putBoolean(STATE_OFFLINE, isOfflineMode);
-        if (recyclerView != null && recyclerView.getLayoutManager() != null) {
-            int pos = ((LinearLayoutManager) recyclerView.getLayoutManager())
-                    .findFirstVisibleItemPosition();
-            outState.putInt(STATE_SCROLL, pos);
+        outState.putString(STATE_SERVER_ID, currentServer == null ? null : currentServer.getId());
+        outState.putBoolean(STATE_SEARCH_RETURN, returningFromSearch);
+        // 数据未返回时再次重建，也不能用空列表的状态覆盖待恢复的状态。
+        if (pendingScrollState != null) {
+            outState.putParcelable(STATE_LAYOUT, pendingScrollState.getParcelable(STATE_LAYOUT));
+            outState.putInt(STATE_SCROLL, pendingScrollState.getInt(STATE_SCROLL, -1));
+        } else if (recyclerView != null && recyclerView.getLayoutManager() != null) {
+            outState.putParcelable(STATE_LAYOUT, searchReturnState != null ? searchReturnState
+                    : recyclerView.getLayoutManager().onSaveInstanceState());
+            outState.putInt(STATE_SCROLL, ((LinearLayoutManager) recyclerView.getLayoutManager())
+                    .findFirstVisibleItemPosition());
         }
     }
 
@@ -2571,25 +2598,27 @@ public class MainActivity extends AppCompatActivity implements
     private boolean restoreNavState(Bundle savedInstanceState) {
         if (savedInstanceState == null) return false;
 
-        String savedPath = savedInstanceState.getString(STATE_CURRENT_PATH, "/");
-        ArrayList<String> savedStack =
-                savedInstanceState.getStringArrayList(STATE_PATH_STACK);
-        boolean savedOffline = savedInstanceState.getBoolean(STATE_OFFLINE, false);
-
+        String serverId = savedInstanceState.getString(STATE_SERVER_ID, null);
+        currentServer = serverId == null ? null : findServerById(serverId);
         pathStack.clear();
-        if (savedStack != null) pathStack.addAll(savedStack);
-        isOfflineMode = savedOffline;
+        currentPath = "/";
+        returningFromSearch = false;
+        searchReturnState = null;
+        pendingScrollState = null;
+        // 删除的服务器不可借用另一台服务器的相同路径或滚动位置。
+        if (serverId != null && currentServer == null) return false;
 
-        if (savedPath != null && !savedPath.isEmpty() && !"/".equals(savedPath)) {
-            currentPath = savedPath;
-            if (rlog != null) {
-                rlog.i(TAG, "已恢复导航状态: path=" + currentPath
-                        + " stackSize=" + pathStack.size()
-                        + " offline=" + isOfflineMode);
-            }
-            return true;
+        String savedPath = savedInstanceState.getString(STATE_CURRENT_PATH, "/");
+        if (currentServer != null) {
+            if (savedPath != null && !savedPath.isEmpty()) currentPath = savedPath;
+            ArrayList<String> savedStack = savedInstanceState.getStringArrayList(STATE_PATH_STACK);
+            if (savedStack != null) pathStack.addAll(savedStack);
         }
-        return false;
+        isOfflineMode = savedInstanceState.getBoolean(STATE_OFFLINE, false);
+        returningFromSearch = savedInstanceState.getBoolean(STATE_SEARCH_RETURN, false);
+        pendingScrollState = savedInstanceState;
+        if (returningFromSearch) searchReturnState = savedInstanceState.getParcelable(STATE_LAYOUT);
+        return currentServer != null;
     }
 
     /**
@@ -2646,23 +2675,32 @@ public class MainActivity extends AppCompatActivity implements
      * 重建这一种场景才需要恢复滚动位置。
      */
     private void restoreScrollPos(Bundle savedInstanceState) {
-        if (savedInstanceState == null || recyclerView == null) return;
+        if (savedInstanceState == null || pendingScrollState != savedInstanceState
+                || recyclerView == null) return;
+        final String serverId = savedInstanceState.getString(STATE_SERVER_ID, null);
+        final String path = savedInstanceState.getString(STATE_CURRENT_PATH, "/");
+        if (!java.util.Objects.equals(serverId, currentServer == null ? null : currentServer.getId())
+                || !java.util.Objects.equals(path, currentPath)) {
+            pendingScrollState = null;
+            searchReturnState = null;
+            return;
+        }
         final int pos = savedInstanceState.getInt(STATE_SCROLL, -1);
-        if (pos <= 0) return;
-
-        if (rlog != null) rlog.i(TAG, "恢复滚动位置: " + pos);
-
+        if (fileListAdapter == null || fileListAdapter.getItemCount() <= Math.max(0, pos)) return;
         recyclerView.post(() -> {
-            try {
-                if (fileListAdapter != null && fileListAdapter.getItemCount() > pos) {
-                    recyclerView.scrollToPosition(pos);
-                } else if (rlog != null) {
-                    rlog.i(TAG, "跳过滚动恢复：列表尚未就绪或项数不足（"
-                            + (fileListAdapter == null ? -1
-                               : fileListAdapter.getItemCount()) + " ≤ " + pos + "）");
-                }
-            } catch (Exception ignored) {
+            if (pendingScrollState != savedInstanceState) return;
+            if (!java.util.Objects.equals(serverId, currentServer == null ? null : currentServer.getId())
+                    || !java.util.Objects.equals(path, currentPath)) {
+                pendingScrollState = null;
+                searchReturnState = null;
+                return;
             }
+            if (fileListAdapter.getItemCount() <= Math.max(0, pos)) return;
+            android.os.Parcelable layout = savedInstanceState.getParcelable(STATE_LAYOUT);
+            if (layout != null) recyclerView.getLayoutManager().onRestoreInstanceState(layout);
+            else if (pos >= 0) recyclerView.scrollToPosition(pos); // 兼容旧保存状态
+            pendingScrollState = null;
+            searchReturnState = null;
         });
     }
 
@@ -2684,14 +2722,21 @@ public class MainActivity extends AppCompatActivity implements
         // 每台服务器就是根目录里的一个条目，进入哪台看 currentServer，
         // 缓存键也带服务器 id，所以不存在「切了服务器界面还在用旧地址」。
         // 此处只需处理：当前浏览的服务器被删掉了 / 列表被改过。
-        syncServerListState();
+        boolean restoreSearch = returningFromSearch;
+        returningFromSearch = false;
+        if (currentServer != null && findServerById(currentServer.getId()) == null) {
+            restoreSearch = false;
+            pendingScrollState = null;
+            searchReturnState = null;
+        }
+        if (!restoreSearch) syncServerListState();
 
         // 回到前台时检查网络是否已恢复。
         // 之前 isOfflineMode 是单向开关，联网后没人复位，导致永远停在
         // 离线模式；这里在每次回到前台时补一次判断并自动切回在线。
         boolean wasOffline = isOfflineMode;
         refreshOfflineFlag();
-        if (wasOffline && !isOfflineMode) {
+        if (!restoreSearch && wasOffline && !isOfflineMode) {
             if (rlog != null) rlog.i(TAG, "回到前台检测到网络恢复，重新加载在线数据");
             toast("网络已恢复", Toast.LENGTH_SHORT);
             loadCurrentPath();
@@ -2702,6 +2747,12 @@ public class MainActivity extends AppCompatActivity implements
         // 此时必须把迷你播放器的标题、按钮、进度条重新对齐到真实状态，
         // 否则会出现"音乐在响但界面显示未播放"。
         syncUiWithPlayer();
+        if (pendingScrollState != null) {
+            restoreScrollPos(pendingScrollState);
+        } else if (restoreSearch && searchReturnState != null) {
+            recyclerView.getLayoutManager().onRestoreInstanceState(searchReturnState);
+            searchReturnState = null;
+        }
     }
 
     // ==================== 新功能①：排序方式 ====================

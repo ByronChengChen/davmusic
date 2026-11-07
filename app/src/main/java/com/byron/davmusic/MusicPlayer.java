@@ -960,16 +960,11 @@ public class MusicPlayer {
     /**
      * 判断两个条目是不是同一首歌（公开静态，供 UI 层复用）。
      *
-     * 先比 href（服务器上的绝对路径），再退回 relativePath —— 两者任一相同
-     * 即认为是同一首。href 可能因服务器返回的编码差异而不同，所以
-     * 不能只靠 href。
+     * 先隔离服务器身份，再比 href / relativePath。不同服务器即使路径同名
+     * 也不是同一首；无归属的旧条目仅可与同样无归属的条目兼容匹配。
      */
     public static boolean isSameTrack(WebDAVFile a, WebDAVFile b) {
-        if (a == null || b == null) return false;
-        String ha = a.getHref(), hb = b.getHref();
-        if (ha != null && ha.equals(hb)) return true;
-        String ra = a.getRelativePath(), rb = b.getRelativePath();
-        return ra != null && ra.equals(rb);
+        return TrackIdentity.same(a, b);
     }
 
     /** 在播放列表中定位文件；找不到返回 -1 */

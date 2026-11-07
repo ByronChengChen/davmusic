@@ -168,4 +168,16 @@
     <string name="lyrics_saved">歌词已保存</string>
     <string name="lyrics_uploaded">歌词已上传到服务器</string>
     <string name="lyrics_upload_failed">歌词已存本地；上传失败：%s</string>
+    <string name="search_title">搜索歌曲</string>
+    <string name="search_hint">输入歌曲文件名</string>
+    <string name="search_clear">清空</string>
+    <string name="search_coverage">仅搜索当前已配置服务器中曾浏览并缓存的目录；不是完整远端音乐库。</string>
+    <string name="search_empty_query">输入关键词搜索，空查询不展示全部歌曲</string>
+    <string name="search_loading">正在搜索本地目录快照…</string>
+    <string name="search_no_results">0 首歌曲：本地快照中没有匹配结果</string>
+    <string name="search_count">找到 %1$d 首歌曲</string>
+    <string name="search_downloaded">已下载</string>
+    <string name="search_not_downloaded">未下载 · 联网可播放</string>
+    <string name="search_offline">离线模式：该歌曲未下载，无法播放。联网后可播放或先下载。</string>
+    <string name="search_removed_server">该歌曲所属服务器已删除，请重新搜索</string>
 </resources>

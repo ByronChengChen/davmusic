@@ -36,7 +36,7 @@ public final class TrackSorter {
      * 中文按 Unicode 排出来对用户就是乱序，中英混排更明显。
      * PRIMARY 强度忽略大小写与重音，"ABC"、"abc"、"Abc" 视为同名。
      *
-     * 只在主线程（列表渲染 / 排序菜单）使用，因此静态共享一个是安全的。
+     * 主线程与搜索后台线程共用；compareNames 同步保护非线程安全的 Collator。
      */
     private static final Collator COLLATOR = Collator.getInstance(Locale.CHINA);
 
@@ -122,7 +122,7 @@ public final class TrackSorter {
      * 不能用「整串 Collator 比较」代替：那样 "Track 10" 会排在 "Track 2" 前面，
      * 专辑里连续编号的曲目看起来就是乱的。
      */
-    public static int compareNames(String a, String b) {
+    public static synchronized int compareNames(String a, String b) {
         if (a == null) a = "";
         if (b == null) b = "";
         int i = 0, j = 0;

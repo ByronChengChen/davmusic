@@ -286,8 +286,48 @@ public class LocalCacheManager {
         }
     }
 
+    private volatile long snapshotRevision;
+    private long snapshotEpoch;
+    private final java.util.concurrent.CopyOnWriteArrayList<Runnable> snapshotListeners =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    public long getSnapshotRevision() { return snapshotRevision; }
+    public synchronized long getSnapshotEpoch() { return snapshotEpoch; }
+    public void addSnapshotListener(Runnable listener) { snapshotListeners.add(listener); }
+    public void removeSnapshotListener(Runnable listener) { snapshotListeners.remove(listener); }
+    private void snapshotsChanged() {
+        snapshotRevision++;
+        // Listeners only schedule work; never read ServerStore while holding this monitor.
+        for (Runnable listener : snapshotListeners) listener.run();
+    }
+
+    /** Called only on the search worker; no remote requests, no legacy offline index. */
+    public synchronized List<WebDAVFile> loadSearchSnapshots() {
+        List<WebDAVFile> result = new ArrayList<>();
+        File[] paths = getSnapshotDirectory().listFiles((dir, name) -> name.endsWith(".json"));
+        if (paths == null) return result;
+        java.util.Arrays.sort(paths, java.util.Comparator.comparing(File::getName));
+        for (File path : paths) {
+            try {
+                JSONObject snapshot = new JSONObject(new String(java.nio.file.Files.readAllBytes(path.toPath()),
+                        java.nio.charset.StandardCharsets.UTF_8));
+                JSONArray entries = snapshot.getJSONArray("files");
+                List<WebDAVFile> directory = new ArrayList<>();
+                for (int i = 0; i < entries.length(); i++) directory.add(jsonToFile(entries.getJSONObject(i)));
+                result.addAll(directory);
+            } catch (IOException | JSONException e) {
+                Log.w(TAG, "搜索跳过损坏快照: " + path.getName());
+            }
+        }
+        return result;
+    }
+
+    public synchronized void saveSnapshotIfCurrent(String path, List<WebDAVFile> files, long epoch) {
+        if (snapshotEpoch == epoch) saveSnapshot(path, files);
+    }
+
     // 文件夹快照管理
-    public void saveSnapshot(String folderPath, List<WebDAVFile> files) {
+    public synchronized void saveSnapshot(String folderPath, List<WebDAVFile> files) {
         try {
             JSONObject snapshot = new JSONObject();
             snapshot.put("path", folderPath);
@@ -303,6 +343,7 @@ public class LocalCacheManager {
             File snapshotFile = getSnapshotFile(folderPath);
             
             AtomicSnapshotWriter.write(snapshotFile, snapshotJson);
+            snapshotsChanged();
             
             Log.d(TAG, "Saved snapshot for: " + folderPath);
         } catch (JSONException | IOException e) {
@@ -340,11 +381,12 @@ public class LocalCacheManager {
         }
     }
 
-    public void deleteSnapshot(String folderPath) {
+    public synchronized void deleteSnapshot(String folderPath) {
         File snapshotFile = getSnapshotFile(folderPath);
         if (snapshotFile.exists()) {
             snapshotFile.delete();
         }
+        snapshotsChanged();
     }
 
     public boolean hasSnapshot(String folderPath) {
@@ -361,7 +403,9 @@ public class LocalCacheManager {
     // 每个条目自带 serverId，判定归属只需看条目本身，不必再维护全局状态。
 
     /** 清空所有目录快照（仅在「清空缓存」时用；切换服务器不再需要调用） */
-    public void clearSnapshots() {
+    public synchronized void clearSnapshots() {
+        snapshotEpoch++;
+        snapshotsChanged();
         try {
             File dir = getSnapshotDirectory();
             if (dir != null && dir.exists() && dir.isDirectory()) {
@@ -381,7 +425,7 @@ public class LocalCacheManager {
     }
 
     // 清空缓存
-    public void clearAllCache() {
+    public synchronized void clearAllCache() {
         // 清空下载文件
         for (String localPath : downloadMap.values()) {
             File file = new File(localPath);
@@ -392,16 +436,8 @@ public class LocalCacheManager {
         downloadMap.clear();
         preferences.edit().remove(KEY_DOWNLOAD_MAP).apply();
         
-        // 清空快照
-        File snapshotDir = getSnapshotDirectory();
-        if (snapshotDir.exists() && snapshotDir.isDirectory()) {
-            File[] snapshotFiles = snapshotDir.listFiles();
-            if (snapshotFiles != null) {
-                for (File file : snapshotFiles) {
-                    file.delete();
-                }
-            }
-        }
+        // Same lock/epoch as publication: no half-cleared search corpus.
+        clearSnapshots();
 
         // 清空歌词缓存（LyricsActivity 的 filesDir/lyrics）。
         // 歌词是派生数据，清缓存后重新打开歌曲会重新拉取，不需要保留。

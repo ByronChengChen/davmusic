@@ -2,6 +2,9 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
+    <item android:id="@+id/menu_search" android:title="@string/search_title"
+        android:icon="@drawable/ic_search" app:showAsAction="always" />
+
     <!-- 新建文件夹：只在【已进入某台服务器】时可见（见 MainActivity.onPrepareOptionsMenu）。
          根目录列的是服务器本身，那一层没有"文件夹"可新建。 -->
     <item

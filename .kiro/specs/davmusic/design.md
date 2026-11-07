@@ -24,9 +24,9 @@
 > - v1.49–v1.50：夜间色板、主题/图标适配与列表文字色修复
 > - 2026-11-01：按 v1.50（`fba3714`，versionCode 150）核对实现；纠正客户端工厂、缓存归属、根列表适配器、歌词布局/双击、线程与测试覆盖描述，标注尚存实现偏差。
 >
-> v1.51 交付预备：快照原子发布与并发读取修复（R6.11）；本地纯 JVM 已验证，CI / 真机尚未运行。
+> v1.52 CI 交付预备：包含快照原子发布（R6.11）与歌曲搜索（R16）；本地 JVM 与独立审查通过，CI 本轮执行，真机待验收。
 >
-> **当前规模口径**：`app/src/main/java/**/*.java` 的 25 个源文件（按文件数，不含内部类、测试、生成代码），逐文件 `splitlines()` 物理行数合计 **11126 行**（含空行/注释）；`MainActivity.java` **3049 行**。历史版本规模仅作为当时记录，v1.46/v1.47 已按相同口径复核。
+> **当前规模口径**：`app/src/main/java/**/*.java` 的 29 个源文件（按文件数，不含内部类、测试、生成代码），逐文件 `splitlines()` 物理行数合计 **11485 行**（含空行/注释）；`MainActivity.java` **3100 行**。历史版本规模仅作为当时记录，v1.46/v1.47 已按相同口径复核。
 
 ---
 
@@ -74,7 +74,7 @@
 | 服务器 | 单例 `WebDAVClient`，全局唯一凭据 | **按 `ServerProfile` 实例化**，`clientFor(server)` 取用，凭据不共享 |
 | 顶层 | 直接进入 WebDAV 根目录 | **服务器列表即根目录**，进入某台后才显示其 WebDAV 根 |
 | 缓存键 | 远程路径 | **`cacheKeyOf(server, path)`**，路径前挂服务器作用域 |
-| 播放 | `MediaPlayer` 在 Activity 内 | **前台服务持有播放器**，Activity 只做 UI 绑定 |
+| 播放 | `MediaPlayer` 在 Activity 内 | **MusicPlayer 单例持有播放队列和播放器**，前台服务承载，Activity 只做 UI 绑定 |
 | 离线 | 仅文件夹快照 | 快照 **+ 已下载文件的离线索引与目录树重建** |
 
 ### 1.2 外部依赖
@@ -93,6 +93,17 @@
 > XML 解析使用 Android 内置的 `XmlPullParser` / DOM，不引入 SimpleXML。JSON 序列化使用 Android 内置 `org.json`，不引入 Gson。
 
 ---
+
+## 本次搜索实现（R16，开发中）
+
+- `SearchActivity` 独立于 MainActivity 的目录状态，include 原有播放条并使用 `PlayerBarController`；返回恢复原列表 LayoutManager 状态，不切目录、不重排。
+- MainActivity 的 Bundle 保留 serverId、目录/返回栈、搜索返回标记及 LayoutManager Parcelable；先解析已配置服务器再加载，服务器已删则清旧状态回根。AdapterDataObserver 等数据发布后 post 一次性恢复并复核服务器/目录，替代 300ms 定时恢复；未就绪状态跨再次重建保留，普通导航作废旧状态。`test_search_return_jvm.py` 执行原方法（明示 host UI stub），不是 Android 生命周期/Parcelable 编解码验收。
+- `SnapshotSearchEngine` 只负责音频/服务器过滤、身份去重、文件名 token AND 匹配与 TrackSorter 排序；不触网、不读 offline_index。静态 Collator 的访问改为同步，允许后台搜索与主线程排序共存。
+- `SnapshotSearchController` 单工作线程持有内存 corpus。查询 generation 与 Source revision 在交付时双校验；过期工作不可覆盖新结果。快照变化和服务器配置变更驱动失效，输入仅使用已有内存。
+- `LocalCacheManager.loadSearchSnapshots()` 在工作线程枚举持久 `.json`，单份解析失败跳过；发布/删除/清空/汇总串行，继续使用 AtomicSnapshotWriter。清空递增 epoch；MainActivity 发起目录请求时捕获 epoch，通过 saveSnapshotIfCurrent 防止迟到响应复活快照，UI/内存目录缓存发布再次校验。
+- `TrackIdentity` 被 MusicPlayer.isSameTrack 委托调用：先隔离 serverId，再比 href / relativePath，避免搜索跨服务器同路径队列误定位。
+- 点击时复制完整结果队列；查询、清空、退出不调用播放/队列 API。离线无本地先提示，不替换队列；MusicPlayer 继续本地优先/所属服务器取流，不改网络策略。
+- 详细设计及验证边界见 [music-search-design.md](../../../../docs/music-search-design.md)。无新权限/扫描服务/数据库；旧离线浏览键缺口不是本次修复范围。
 
 ## 2. 组件设计
 
@@ -975,7 +986,7 @@ public interface OnPlaybackListener {
 | 无网络检测 | 模拟断网 → `isNetworkConnected()` 返回 false |
 | 网络状态字符串 | 离线 → 返回可读的离线描述（供 UI 显示） |
 
-另外已有 `TrackSorterTest` **11** 个与 `HttpDateParserTest` **10** 个用例：自然序/文件夹置顶/未知时间下沉/确定性兜底，以及 RFC/ISO 时间解析、无效值与尾随垃圾。当前 `app/src/test/**/*.java` 共 **9 个测试源文件 / 97 个 `@Test`**（静态清点，不代表本次执行测试）。
+另外已有 `TrackSorterTest` **11** 个与 `HttpDateParserTest` **10** 个用例：自然序/文件夹置顶/未知时间下沉/确定性兜底，以及 RFC/ISO 时间解析、无效值与尾随垃圾。历史 v1.50 为 9 个测试类 / 97 个 `@Test`；当前共 **13 个测试类 / 113 个 `@Test`**（静态清点，不代表全部执行）。本次 SDK-free JUnit 实际执行 71 例 + 存储共享检查；其余 Robolectric/网络相关测试待 CI。
 
 ### 8.3 不在当前版本覆盖的部分
 

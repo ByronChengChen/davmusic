@@ -20,7 +20,7 @@
 > 任务 30 覆盖 v1.48 系统媒体控制中心 seek；任务 31 覆盖 v1.49–v1.50 深色模式与列表文字修复。
 > 2026-11-01 修订：核对 `fba3714`（versionCode 150 / versionName 1.50），补齐任务 30–31、
 > 总览/依赖/状态摘要，纠正封面与列表可见性、活动服务器、快照字段、缓存位置及测试数量的旧描述。
-> v1.50 用户已持续实机使用并确认正常；当前工作区为 **v1.51 交付预备（25 个生产 Java 文件 / 11126 物理行）**，任务 32 的本地纯 JVM 验证通过，CI / 真机待验收。
+> v1.50 用户已持续实机使用并确认正常；当前工作区为 **v1.52 CI 交付预备（29 个生产 Java 文件 / 11485 物理行）**，任务 32 的本地纯 JVM 验证通过，CI / 真机待验收。
 
 ---
 
@@ -60,6 +60,7 @@
 | **30** | **系统媒体控制中心进度拖动（v1.48）** | `[x]` | R9.9 | `MusicService.onSeekTo` / `syncPlaybackState` |
 | **31** | **系统深色模式与列表文字修复（v1.49–v1.50）** | `[x]` | R15.1–R15.4 | `values-night/colors.xml`, 主题/图标, `FileListAdapter` |
 | **32** | **目录快照原子写入（v1.51 预备）** | `[-]` | R6.11 | 原子写入与本地纯 JVM 已验证；CI / 真机待验收 |
+| **33** | **本地快照跨服务器歌曲搜索播放** | `[-]` | R16.1–R16.5 | 实现与 JVM/静态检查通过；CI/真机待验收 |
 
 > **说明**：任务 1–9 由 Kiro 执行 agent 一次完成（9 个 Java 文件 / 2783 行）。
 > 任务 12–21 是后续在真机验证中迭代出来的实际工作，原 spec 未记录，本次补入。
@@ -787,6 +788,21 @@ requirements 曾把「播放模式」列在范围外。这次是补做，不是�
 
 ---
 
+## 任务 33 — 本地快照跨服务器歌曲搜索播放 `[-]`
+
+- [x] 设计与 R16 需求：覆盖已缓存目录而非远端全库；替代旧扫描提案，无数据库/递归/网络搜索。
+- [x] SnapshotSearchEngine：音频/已配置服务器过滤、serverId + relativePath 去重、文件名去扩展名/trim/大小写无关/分词 AND、空查询不列全量，TrackSorter 全局排序。
+- [x] SnapshotSearchController：单线程后台汇总与内存查询、generation/revision 防旧结果覆盖、关闭后拒收。
+- [x] LocalCacheManager：快照 revision/监听、单份损坏跳过、空刷新覆盖、发布/清空/删除/读取并发隔离；清空 epoch 防止旧网络响应回写。
+- [x] SearchActivity：主页面按钮、独立结果页、数量/加载/空提示、目录/服务器别名/下载状态/播放高亮；共享播放条与 adjustResize、主题资源。
+- [x] 点击时复制结果队列，从点击曲目播放，复用 MusicPlayer/MusicService；离线无下载提示；清空/查询/退出不改队列。MainActivity 返回恢复滚动位置。
+- [x] 发现 MusicPlayer.isSameTrack 仅按 href/relativePath 比较会混淆跨服务器同名；抽 TrackIdentity 先隔离归属并增加回归测试。
+- [x] 本地 RED→GREEN：匹配期望 1 实际 0、过滤期望 2 实际 7、异步旧结果错误交付、存储 revision 未变化、跨服务器身份误判；实际通过结果见 docs/music-search-design.md。
+- [ ] CI Android 编译/JUnit/Robolectric（新增 StorageTest 包装未在本机运行）、真机键盘/主题/原页面返回/跨服务器连续切歌验收。
+- [x] 独立审查：生命周期/快照并发/队列身份；用户已授权 v1.52 提交推送与 GitHub Actions 出包。真机验收前不打 tag。
+
+**验证命令**：`python3 scripts/test_music_search_jvm.py`、`python3 scripts/check_music_search.py`、`git diff --check`。纯 JVM stub 不代表 Android 框架测试；静态契约检查不代表 UI 运行。
+
 ## 依赖关系
 
 ```
@@ -824,13 +840,13 @@ requirements 曾把「播放模式」列在范围外。这次是补做，不是�
 
 ---
 
-## 任务状态总览（v1.51 工作区交付预备，基于 `5dd5338`）
+## 任务状态总览（v1.52 CI 交付预备，基于 `8327c06`）
 
 | 分类 | 状态 |
 |------|------|
 | 脚手架与核心功能（1–9） | 任务 6 下载百分比/残留清理、任务 8 离线快照链路仍有缺口；任务 5 的封面关联/图片歌词列表展示为范围外 |
 | CI 与产物（10） | 完成（可出包，真机可装） |
-| 单元测试（11） | **部分完成**：10 个测试类 / 105 个 `@Test`（新增 8 例待 CI）；本地 main 已实际通过 7 场景；`MusicPlayerTest`、`NetworkUtilsTest` 待补；JUnit/Robolectric 本次未运行 |
+| 单元测试（11） | **部分完成**：13 个测试类 / 113 个 `@Test`；本次 SDK-free JUnit 实际执行 71 例 + 存储共享检查，Robolectric 未运行；`MusicPlayerTest`、`NetworkUtilsTest` 待补 |
 | 真机迭代增强（12–31） | v1.50 用户持续实机使用确认正常；任务 13 删除服务器清缓存、任务 15 离线索引链路、任务 16 跨目录定位尚未完整实现，标为部分完成 |
 
-**代码规模**：25 个生产 Java 文件 / 11126 物理行（v1.51 交付预备，仅 `app/src/main/java/com/byron/davmusic/*.java`，按 `splitlines()` 计数，含注释与空行；`wc -l` 按换行符计为 11123）。测试另计：10 个测试类 / 105 个 `@Test`，另有不含 JUnit 注解的共享 Checks。各任务产出中的行数统一为本次源码统计，不混用历史版本规模。
+**代码规模**：29 个生产 Java 文件 / 11485 物理行（本地快照搜索开发工作区；仅生产 Java，按 `splitlines()` 含注释/空行）；测试 13 类 / 113 个 `@Test`，共享 Checks 另计。旧任务产出行数为其当时快照，不冒充当前计数。
