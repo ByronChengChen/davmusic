@@ -17,7 +17,7 @@
         android:text="@string/title_server_config"
         android:textSize="24sp"
         android:textStyle="bold"
-        android:textColor="@color/primary" />
+        android:textColor="@color/text_primary" />
     
     <!-- 服务器地址输入框 -->
     <com.google.android.material.textfield.TextInputLayout

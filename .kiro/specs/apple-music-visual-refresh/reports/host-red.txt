@@ -1,0 +1,357 @@
+$ python3 -m unittest discover -s tools -p test_visual_refresh.py -v
+test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) ... 
+  test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values', pair=('text_primary', 'background')) ... FAIL
+  test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values', pair=('text_secondary', 'background')) ... FAIL
+  test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values', pair=('text_primary', 'surface')) ... FAIL
+  test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values', pair=('text_secondary', 'surface')) ... FAIL
+  test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values', pair=('text_primary', 'player_background')) ... FAIL
+  test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values', pair=('text_secondary', 'player_background')) ... FAIL
+  test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values', pair=('item_playing_text', 'item_playing_background')) ... FAIL
+  test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values', pair=('white', 'button_normal')) ... FAIL
+  test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values', pair=('accent', 'surface')) ... ERROR
+  test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values', pair=('toolbar_text', 'toolbar_background')) ... ERROR
+  test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values-night', pair=('text_primary', 'background')) ... FAIL
+  test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values-night', pair=('text_secondary', 'background')) ... FAIL
+  test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values-night', pair=('text_primary', 'surface')) ... FAIL
+  test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values-night', pair=('text_secondary', 'surface')) ... FAIL
+  test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values-night', pair=('text_primary', 'player_background')) ... FAIL
+  test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values-night', pair=('text_secondary', 'player_background')) ... FAIL
+  test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values-night', pair=('white', 'button_normal')) ... ERROR
+  test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values-night', pair=('accent', 'surface')) ... ERROR
+  test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values-night', pair=('toolbar_text', 'toolbar_background')) ... ERROR
+test_all_xml_well_formed (test_visual_refresh.VisualRefreshContracts.test_all_xml_well_formed) ... ok
+test_every_light_color_has_night_value (test_visual_refresh.VisualRefreshContracts.test_every_light_color_has_night_value) ... FAIL
+test_layout_structure_actions_and_touch_geometry_unchanged (test_visual_refresh.VisualRefreshContracts.test_layout_structure_actions_and_touch_geometry_unchanged) ... ok
+test_lyrics_no_fixed_blue (test_visual_refresh.VisualRefreshContracts.test_lyrics_no_fixed_blue) ... FAIL
+test_protected_files_and_nonvisual_java_unchanged (test_visual_refresh.VisualRefreshContracts.test_protected_files_and_nonvisual_java_unchanged) ... FAIL
+test_target_palette (test_visual_refresh.VisualRefreshContracts.test_target_palette) ... 
+  test_target_palette (test_visual_refresh.VisualRefreshContracts.test_target_palette) (folder='values') ... FAIL
+  test_target_palette (test_visual_refresh.VisualRefreshContracts.test_target_palette) (folder='values-night') ... FAIL
+test_version_only_gradle_change (test_visual_refresh.VisualRefreshContracts.test_version_only_gradle_change) ... FAIL
+
+======================================================================
+ERROR: test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values', pair=('accent', 'surface'))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 83, in test_accessible_text_pairs
+    self.assertGreaterEqual(contrast(c[fg], c[bg]), 4.5)
+                                     ~^^^^
+KeyError: 'accent'
+
+======================================================================
+ERROR: test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values', pair=('toolbar_text', 'toolbar_background'))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 83, in test_accessible_text_pairs
+    self.assertGreaterEqual(contrast(c[fg], c[bg]), 4.5)
+                                     ~^^^^
+KeyError: 'toolbar_text'
+
+======================================================================
+ERROR: test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values-night', pair=('white', 'button_normal'))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 83, in test_accessible_text_pairs
+    self.assertGreaterEqual(contrast(c[fg], c[bg]), 4.5)
+                                     ~^^^^
+KeyError: 'white'
+
+======================================================================
+ERROR: test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values-night', pair=('accent', 'surface'))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 83, in test_accessible_text_pairs
+    self.assertGreaterEqual(contrast(c[fg], c[bg]), 4.5)
+                                     ~^^^^
+KeyError: 'accent'
+
+======================================================================
+ERROR: test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values-night', pair=('toolbar_text', 'toolbar_background'))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 83, in test_accessible_text_pairs
+    self.assertGreaterEqual(contrast(c[fg], c[bg]), 4.5)
+                                     ~^^^^
+KeyError: 'toolbar_text'
+
+======================================================================
+FAIL: test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values', pair=('text_primary', 'background'))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 83, in test_accessible_text_pairs
+    self.assertGreaterEqual(contrast(c[fg], c[bg]), 4.5)
+                            ~~~~~~~~^^^^^^^^^^^^^^
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 43, in contrast
+    x, y = sorted([luminance(a), luminance(b)])
+                   ~~~~~~~~~^^^
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 36, in luminance
+    assert len(c) == 6, color
+           ^^^^^^^^^^^
+AssertionError: #DE000000
+
+======================================================================
+FAIL: test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values', pair=('text_secondary', 'background'))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 83, in test_accessible_text_pairs
+    self.assertGreaterEqual(contrast(c[fg], c[bg]), 4.5)
+                            ~~~~~~~~^^^^^^^^^^^^^^
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 43, in contrast
+    x, y = sorted([luminance(a), luminance(b)])
+                   ~~~~~~~~~^^^
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 36, in luminance
+    assert len(c) == 6, color
+           ^^^^^^^^^^^
+AssertionError: #8A000000
+
+======================================================================
+FAIL: test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values', pair=('text_primary', 'surface'))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 83, in test_accessible_text_pairs
+    self.assertGreaterEqual(contrast(c[fg], c[bg]), 4.5)
+                            ~~~~~~~~^^^^^^^^^^^^^^
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 43, in contrast
+    x, y = sorted([luminance(a), luminance(b)])
+                   ~~~~~~~~~^^^
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 36, in luminance
+    assert len(c) == 6, color
+           ^^^^^^^^^^^
+AssertionError: #DE000000
+
+======================================================================
+FAIL: test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values', pair=('text_secondary', 'surface'))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 83, in test_accessible_text_pairs
+    self.assertGreaterEqual(contrast(c[fg], c[bg]), 4.5)
+                            ~~~~~~~~^^^^^^^^^^^^^^
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 43, in contrast
+    x, y = sorted([luminance(a), luminance(b)])
+                   ~~~~~~~~~^^^
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 36, in luminance
+    assert len(c) == 6, color
+           ^^^^^^^^^^^
+AssertionError: #8A000000
+
+======================================================================
+FAIL: test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values', pair=('text_primary', 'player_background'))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 83, in test_accessible_text_pairs
+    self.assertGreaterEqual(contrast(c[fg], c[bg]), 4.5)
+                            ~~~~~~~~^^^^^^^^^^^^^^
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 43, in contrast
+    x, y = sorted([luminance(a), luminance(b)])
+                   ~~~~~~~~~^^^
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 36, in luminance
+    assert len(c) == 6, color
+           ^^^^^^^^^^^
+AssertionError: #DE000000
+
+======================================================================
+FAIL: test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values', pair=('text_secondary', 'player_background'))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 83, in test_accessible_text_pairs
+    self.assertGreaterEqual(contrast(c[fg], c[bg]), 4.5)
+                            ~~~~~~~~^^^^^^^^^^^^^^
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 43, in contrast
+    x, y = sorted([luminance(a), luminance(b)])
+                   ~~~~~~~~~^^^
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 36, in luminance
+    assert len(c) == 6, color
+           ^^^^^^^^^^^
+AssertionError: #8A000000
+
+======================================================================
+FAIL: test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values', pair=('item_playing_text', 'item_playing_background'))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 83, in test_accessible_text_pairs
+    self.assertGreaterEqual(contrast(c[fg], c[bg]), 4.5)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 4.02893808971877 not greater than or equal to 4.5
+
+======================================================================
+FAIL: test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values', pair=('white', 'button_normal'))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 83, in test_accessible_text_pairs
+    self.assertGreaterEqual(contrast(c[fg], c[bg]), 4.5)
+                            ~~~~~~~~^^^^^^^^^^^^^^
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 43, in contrast
+    x, y = sorted([luminance(a), luminance(b)])
+                   ~~~~~~~~~^^^
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 36, in luminance
+    assert len(c) == 6, color
+           ^^^^^^^^^^^
+AssertionError: #FFFFFFFF
+
+======================================================================
+FAIL: test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values-night', pair=('text_primary', 'background'))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 83, in test_accessible_text_pairs
+    self.assertGreaterEqual(contrast(c[fg], c[bg]), 4.5)
+                            ~~~~~~~~^^^^^^^^^^^^^^
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 43, in contrast
+    x, y = sorted([luminance(a), luminance(b)])
+                   ~~~~~~~~~^^^
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 36, in luminance
+    assert len(c) == 6, color
+           ^^^^^^^^^^^
+AssertionError: #E6FFFFFF
+
+======================================================================
+FAIL: test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values-night', pair=('text_secondary', 'background'))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 83, in test_accessible_text_pairs
+    self.assertGreaterEqual(contrast(c[fg], c[bg]), 4.5)
+                            ~~~~~~~~^^^^^^^^^^^^^^
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 43, in contrast
+    x, y = sorted([luminance(a), luminance(b)])
+                   ~~~~~~~~~^^^
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 36, in luminance
+    assert len(c) == 6, color
+           ^^^^^^^^^^^
+AssertionError: #99FFFFFF
+
+======================================================================
+FAIL: test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values-night', pair=('text_primary', 'surface'))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 83, in test_accessible_text_pairs
+    self.assertGreaterEqual(contrast(c[fg], c[bg]), 4.5)
+                            ~~~~~~~~^^^^^^^^^^^^^^
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 43, in contrast
+    x, y = sorted([luminance(a), luminance(b)])
+                   ~~~~~~~~~^^^
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 36, in luminance
+    assert len(c) == 6, color
+           ^^^^^^^^^^^
+AssertionError: #E6FFFFFF
+
+======================================================================
+FAIL: test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values-night', pair=('text_secondary', 'surface'))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 83, in test_accessible_text_pairs
+    self.assertGreaterEqual(contrast(c[fg], c[bg]), 4.5)
+                            ~~~~~~~~^^^^^^^^^^^^^^
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 43, in contrast
+    x, y = sorted([luminance(a), luminance(b)])
+                   ~~~~~~~~~^^^
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 36, in luminance
+    assert len(c) == 6, color
+           ^^^^^^^^^^^
+AssertionError: #99FFFFFF
+
+======================================================================
+FAIL: test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values-night', pair=('text_primary', 'player_background'))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 83, in test_accessible_text_pairs
+    self.assertGreaterEqual(contrast(c[fg], c[bg]), 4.5)
+                            ~~~~~~~~^^^^^^^^^^^^^^
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 43, in contrast
+    x, y = sorted([luminance(a), luminance(b)])
+                   ~~~~~~~~~^^^
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 36, in luminance
+    assert len(c) == 6, color
+           ^^^^^^^^^^^
+AssertionError: #E6FFFFFF
+
+======================================================================
+FAIL: test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values-night', pair=('text_secondary', 'player_background'))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 83, in test_accessible_text_pairs
+    self.assertGreaterEqual(contrast(c[fg], c[bg]), 4.5)
+                            ~~~~~~~~^^^^^^^^^^^^^^
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 43, in contrast
+    x, y = sorted([luminance(a), luminance(b)])
+                   ~~~~~~~~~^^^
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 36, in luminance
+    assert len(c) == 6, color
+           ^^^^^^^^^^^
+AssertionError: #99FFFFFF
+
+======================================================================
+FAIL: test_every_light_color_has_night_value (test_visual_refresh.VisualRefreshContracts.test_every_light_color_has_night_value)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 71, in test_every_light_color_has_night_value
+    self.assertEqual(set(colors('values')), set(colors('values-night')))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Items in the first set but not the second:
+'purple_200'
+'teal_200'
+'teal_700'
+'white'
+'purple_700'
+'black'
+'purple_500'
+
+======================================================================
+FAIL: test_lyrics_no_fixed_blue (test_visual_refresh.VisualRefreshContracts.test_lyrics_no_fixed_blue)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 108, in test_lyrics_no_fixed_blue
+    self.assertEqual('@color/button_normal', button.get(A+'backgroundTint'))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: '@color/button_normal' != '#3D5AFE'
+- @color/button_normal
++ #3D5AFE
+
+
+======================================================================
+FAIL: test_protected_files_and_nonvisual_java_unchanged (test_visual_refresh.VisualRefreshContracts.test_protected_files_and_nonvisual_java_unchanged)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 98, in test_protected_files_and_nonvisual_java_unchanged
+    self.assertEqual(before, after, str(p))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'pack[40494 chars]his, R.color.network_offline));\n        } els[76266 chars]\n\n' != 'pack[40494 chars]his, android.R.color.holo_red_dark));\n       [76297 chars]\n\n' : /home/ubuntu/repos/davmusic/app/src/main/java/com/byron/davmusic/MainActivity.java
+
+======================================================================
+FAIL: test_target_palette (test_visual_refresh.VisualRefreshContracts.test_target_palette) (folder='values')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 53, in test_target_palette
+    self.assertEqual(bg, c['background'])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+AssertionError: '#F2F2F7' != '#FFFFFF'
+- #F2F2F7
++ #FFFFFF
+
+
+======================================================================
+FAIL: test_target_palette (test_visual_refresh.VisualRefreshContracts.test_target_palette) (folder='values-night')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 53, in test_target_palette
+    self.assertEqual(bg, c['background'])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+AssertionError: '#000000' != '#121212'
+- #000000
++ #121212
+
+
+======================================================================
+FAIL: test_version_only_gradle_change (test_visual_refresh.VisualRefreshContracts.test_version_only_gradle_change)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/repos/davmusic/tools/test_visual_refresh.py", line 103, in test_version_only_gradle_change
+    self.assertEqual(expected, (ROOT/p).read_text())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'plug[241 chars]de 154\n        versionName "1.54"\n\n        [3870 chars]n}\n' != 'plug[241 chars]de 153\n        versionName "1.53"\n\n        [3870 chars]n}\n'
+Diff is 4398 characters long. Set self.maxDiff to None to see it.
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.104s
+
+FAILED (failures=20, errors=5)
+
+exit=1

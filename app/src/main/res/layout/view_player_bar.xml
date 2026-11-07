@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 播放控制条：主界面（迷你播放器）与歌词页共用同一份布局。
      两处通过 <include> 引用，控件 id 一致，逻辑分别由 MainActivity / PlayerBarController 绑定。
-     背景固定为浅灰 + 深色文字：歌词页是深色底，这条浅色条反而更清楚。 -->
+     背景跟随系统浅深色，歌词页面主体仍固定深色。 -->
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -9,9 +9,9 @@
     android:layout_width="match_parent"
     android:layout_height="78dp"
     android:orientation="horizontal"
-    android:background="@color/player_background"
+    android:background="@drawable/player_surface"
     android:padding="8dp"
-    android:elevation="4dp">
+    android:elevation="1dp">
     
     <!-- 播放信息 -->
     <LinearLayout

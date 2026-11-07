@@ -1,0 +1,12 @@
+$ javac -encoding UTF-8 -d /home/ubuntu/.hermes/cache/scratch/davmusic154-jvm app/src/main/java/com/byron/davmusic/AtomicSnapshotWriter.java app/src/test/java/com/byron/davmusic/AtomicSnapshotWriterChecks.java
+exit=0
+$ java -Djava.io.tmpdir=/home/ubuntu/.hermes/cache/scratch/davmusic154-jvm -cp /home/ubuntu/.hermes/cache/scratch/davmusic154-jvm com.byron.davmusic.AtomicSnapshotWriterChecks
+PASS new
+PASS replace
+PASS failedOverwrite
+PASS failedFirst
+PASS beforePublish
+PASS moveFailure
+PASS concurrent
+PASS 7 scenarios
+exit=0

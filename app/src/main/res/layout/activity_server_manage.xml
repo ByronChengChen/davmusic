@@ -11,9 +11,9 @@
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
         android:layout_height="?attr/actionBarSize"
-        android:background="?attr/colorPrimary"
+        android:background="@color/toolbar_background"
         app:title="@string/title_server_manage"
-        app:titleTextColor="@color/on_primary" />
+        app:titleTextColor="@color/toolbar_text" />
 
     <!-- 服务器数量 / 操作提示 -->
     <TextView

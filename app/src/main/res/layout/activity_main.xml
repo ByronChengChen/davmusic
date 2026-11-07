@@ -11,9 +11,9 @@
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
         android:layout_height="?attr/actionBarSize"
-        android:background="?attr/colorPrimary"
+        android:background="@color/toolbar_background"
         app:title="@string/title_folder_browser"
-        app:titleTextColor="@color/on_primary" />
+        app:titleTextColor="@color/toolbar_text" />
     
     <!-- 顶部信息区域 -->
     <LinearLayout

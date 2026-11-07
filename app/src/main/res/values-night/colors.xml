@@ -1,71 +1,57 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  深色模式色板（系统深色时自动生效）。
-
-  只覆盖 values/colors.xml 里同名颜色：布局与主题全部引用 @color，所以这里改一处，
-  界面整体跟着变。刻意没有做「深色 = 纯黑 + 亮蓝」：顶栏保留蓝色（较浅色版略深），
-  正文用 87% 白，卡片/播放条用比背景略亮的表面色，靠明度而不是边框分层。
--->
+<!-- Quiet Music palette: surfaces and action accents are separate roles. -->
 <resources>
-    <!-- 主色调：顶栏仍是品牌蓝，深色下压暗一档，避免刺眼 -->
-    <color name="primary">#1E88E5</color>
-    <color name="primary_variant">#1565C0</color>
-    <color name="secondary">#03DAC5</color>
-    <color name="secondary_variant">#018786</color>
-
-    <!-- 背景层次：背景最暗，卡片/对话框比背景亮一档 -->
-    <color name="background">#121212</color>
-    <color name="surface">#1E1E1E</color>
-    <color name="error">#CF6679</color>
-
+    <color name="purple_200">#FFBB86FC</color>
+    <color name="purple_500">#FF6200EE</color>
+    <color name="purple_700">#FF3700B3</color>
+    <color name="teal_200">#FF03DAC5</color>
+    <color name="teal_700">#FF018786</color>
+    <color name="black">#000000</color>
+    <color name="white">#FFFFFF</color>
+    <color name="primary">#C92C48</color>
+    <color name="primary_variant">#A61E39</color>
+    <color name="secondary">#C92C48</color>
+    <color name="secondary_variant">#A61E39</color>
+    <color name="background">#000000</color>
+    <color name="surface">#1C1C1E</color>
+    <color name="error">#FF7188</color>
     <color name="on_primary">#FFFFFF</color>
-    <color name="on_secondary">#000000</color>
-    <color name="on_background">#E6FFFFFF</color>
-    <color name="on_surface">#E6FFFFFF</color>
-    <color name="on_error">#000000</color>
-
-    <!-- 文本 -->
-    <color name="text_primary">#E6FFFFFF</color>
-    <color name="text_secondary">#99FFFFFF</color>
-    <color name="text_disabled">#61FFFFFF</color>
-
-    <!-- 下载状态 -->
-    <color name="download_state_downloaded">#81C784</color>
-    <color name="download_state_downloading">#64B5F6</color>
-    <color name="download_state_not_downloaded">#9E9E9E</color>
-
-    <!-- 正在播放条目 -->
-    <color name="item_playing_background">#16283D</color>
-    <color name="item_playing_text">#90CAF9</color>
-
-    <!-- 网络状态 -->
-    <color name="network_online">#81C784</color>
-    <color name="network_offline">#EF5350</color>
-    <color name="network_wifi">#64B5F6</color>
-    <color name="network_mobile">#FFB74D</color>
-
-    <!-- 界面元素 -->
-    <color name="divider">#1FFFFFFF</color>
-    <color name="ripple">#33FFFFFF</color>
-    <color name="card_background">#1E1E1E</color>
+    <color name="on_secondary">#FFFFFF</color>
+    <color name="on_background">#F5F5F7</color>
+    <color name="on_surface">#F5F5F7</color>
+    <color name="on_error">#FFFFFF</color>
+    <color name="text_primary">#F5F5F7</color>
+    <color name="text_secondary">#A1A1A6</color>
+    <color name="text_disabled">#636366</color>
+    <color name="download_state_downloaded">#75D69C</color>
+    <color name="download_state_downloading">#FF7188</color>
+    <color name="download_state_not_downloaded">#A1A1A6</color>
+    <color name="item_playing_background">#3A1822</color>
+    <color name="item_playing_text">#FF7188</color>
+    <color name="network_online">#75D69C</color>
+    <color name="network_offline">#FF7188</color>
+    <color name="network_wifi">#FF7188</color>
+    <color name="network_mobile">#E9B75D</color>
+    <color name="divider">#38383A</color>
+    <color name="ripple">#33FF7188</color>
+    <color name="card_background">#1C1C1E</color>
     <color name="card_shadow">#00000000</color>
-
-    <!-- 播放条：比背景亮一点，与列表区分开 -->
-    <color name="player_background">#1A1A1A</color>
-    <color name="player_progress_background">#33FFFFFF</color>
-    <color name="player_progress_foreground">#64B5F6</color>
-
-    <!-- 按钮 -->
-    <color name="button_normal">#1E88E5</color>
-    <color name="button_pressed">#1565C0</color>
-    <color name="button_disabled">#3A3A3A</color>
-
-    <!-- 图标 -->
-    <color name="icon_normal">#B3FFFFFF</color>
-    <color name="icon_active">#64B5F6</color>
-    <color name="icon_disabled">#4DFFFFFF</color>
-
-    <!-- 系统栏 -->
-    <color name="status_bar_color">#1565C0</color>
+    <color name="player_background">#2C2C2E</color>
+    <color name="player_progress_background">#48484A</color>
+    <color name="player_progress_foreground">#FF7188</color>
+    <color name="button_normal">#C92C48</color>
+    <color name="button_pressed">#A61E39</color>
+    <color name="button_disabled">#48484A</color>
+    <color name="icon_normal">#D1D1D6</color>
+    <color name="icon_active">#FF7188</color>
+    <color name="icon_disabled">#636366</color>
+    <color name="status_bar_color">#1C1C1E</color>
     <color name="navigation_bar_color">#000000</color>
+    <color name="lyrics_background">#161619</color>
+    <color name="lyrics_header">#F2161619</color>
+    <color name="accent">#FF7188</color>
+    <color name="toolbar_background">#1C1C1E</color>
+    <color name="toolbar_text">#F5F5F7</color>
+    <color name="input_background">#2C2C2E</color>
+    <color name="destructive_background">#BD203C</color>
 </resources>

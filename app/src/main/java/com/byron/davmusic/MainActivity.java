@@ -1038,10 +1038,10 @@ public class MainActivity extends AppCompatActivity implements
         
         if (isOfflineMode) {
             networkStatusTextView.setText("离线");
-            networkStatusTextView.setTextColor(ContextCompat.getColor(this, android.R.color.holo_red_dark));
+            networkStatusTextView.setTextColor(ContextCompat.getColor(this, R.color.network_offline));
         } else {
             networkStatusTextView.setText(NetworkUtils.getNetworkStatusString(this));
-            networkStatusTextView.setTextColor(ContextCompat.getColor(this, android.R.color.holo_green_dark));
+            networkStatusTextView.setTextColor(ContextCompat.getColor(this, R.color.network_online));
         }
     }
     
@@ -1349,7 +1349,7 @@ public class MainActivity extends AppCompatActivity implements
 
         // 画笔只建一次：onChildDraw 每帧都会被调用，逐帧 new Paint 是浪费
         final Paint backPaint = new Paint();
-        backPaint.setColor(ContextCompat.getColor(this, android.R.color.holo_red_dark));
+        backPaint.setColor(ContextCompat.getColor(this, R.color.destructive_background));
         final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         textPaint.setColor(android.graphics.Color.WHITE);
         textPaint.setTextSize(16 * density);

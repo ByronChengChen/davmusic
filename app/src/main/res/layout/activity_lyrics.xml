@@ -3,7 +3,7 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#0E0E12"
+    android:background="@color/lyrics_background"
     android:orientation="vertical">
 
     <FrameLayout
@@ -26,7 +26,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_gravity="top"
-            android:background="#CC0E0E12"
+            android:background="@color/lyrics_header"
             android:gravity="center_vertical"
             android:orientation="horizontal"
             android:paddingStart="8dp"
@@ -94,14 +94,14 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="16dp"
-                android:backgroundTint="#3D5AFE"
+                android:backgroundTint="@color/button_normal"
                 android:text="@string/lyrics_search_button"
                 android:textColor="#FFFFFF"
                 android:visibility="gone" />
         </LinearLayout>
     </FrameLayout>
 
-    <!-- 播放控制条：与主界面迷你播放器同一份布局（浅灰底，深色文字） -->
+    <!-- 播放控制条：与主界面共用，跟随系统浅深色。 -->
     <include
         android:id="@+id/playerBar"
         layout="@layout/view_player_bar"
