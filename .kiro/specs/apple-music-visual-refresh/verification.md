@@ -1,4 +1,17 @@
-# v1.54 本地验证报告
+# 视觉换肤验证记录
+
+## v1.55 去绿微调（实施前记录）
+本轮授权仅配色微调与 155 / 1.55 云端交付；先更新需求/设计及验证记录，再写测试。预期：download_state_downloaded → text_primary；network_online → text_secondary；播放/操作/进度和警示红不变。
+审计发现 FileListAdapter 的 DOWNLOADED / DOWNLOADING 名称共用 download_state_downloaded；MainActivity 在线/连接成功、ServerManageActivity 在线使用 network_online。network_wifi / network_mobile 无 Java/XML 使用，故不删除或改色。歌词固定深色策略不动。
+本地只运行 Python 静态检查和资源检查；Robolectric 与全套 JUnit/Android 编译只在 GitHub Actions 运行。实际 RED/GREEN 输出写入 reports/v155-host-*.txt；本次精确提交的 CI 与 APK 校验另存仓库外交付报告，避免结果文档触发第二次构建。尚未真机验收，不打 tag。
+
+### v1.55 已执行本地结果
+- reports/v155-host-red.txt：9 个静态测试，浅深已下载名称颜色及版本预期失败；先仅实现名称角色，再运行 reports/v155-host-online-red.txt，浅深在线颜色及版本预期失败。
+- reports/v155-host-green.txt：9 tests / OK；新增 4 对状态文字与背景的对比度契约，两种模式全部 >= 4.5:1。
+- android-resource-check.py：全部通过，109 个 XML 资源引用及 15 个 style 父级解析通过；git diff --check 通过。
+- Robolectric 两种主题的真实资源颜色与在线 TextView 颜色断言已扩充，待本次精确提交在 CI 执行。本地未运行 Gradle；未真机验证。
+
+## v1.54 历史记录
 
 ## 已实现
 - 按 requirements.md → design.md → 编写资源验收测试并观察 RED → 实施 → GREEN 的顺序完成。

@@ -28,7 +28,12 @@ def tree_contract(node):
 
 
 def colors(folder):
-    return {e.attrib['name']: e.text for e in ET.parse(RES / folder / 'colors.xml').getroot()}
+    raw = {e.attrib['name']: e.text for e in ET.parse(RES / folder / 'colors.xml').getroot()}
+    def resolve(name):
+        value = raw[name]
+        assert value is not None, name
+        return resolve(value.split('/', 1)[1]) if value.startswith('@color/') else value
+    return {name: resolve(name) for name in raw}
 
 
 def luminance(color):
@@ -54,6 +59,11 @@ class VisualRefreshContracts(unittest.TestCase):
                 self.assertEqual(fg, c['text_primary'])
                 self.assertEqual(accent, c['accent'])
                 self.assertEqual('#C92C48', c['primary'])
+                self.assertEqual(c['text_primary'], c['download_state_downloaded'])
+                self.assertEqual(c['text_secondary'], c['network_online'])
+                self.assertEqual(c['error'], c['network_offline'])
+                self.assertEqual(accent, c['player_progress_foreground'])
+                self.assertEqual(accent, c['item_playing_text'])
 
     def test_all_xml_well_formed(self):
         for p in RES.rglob('*.xml'):
@@ -93,6 +103,9 @@ class VisualRefreshContracts(unittest.TestCase):
                      ('item_playing_text','item_playing_background'), ('white','button_normal'),
                      ('accent','surface'), ('toolbar_text','toolbar_background'),
                      ('white','destructive_background')]
+            pairs += [('download_state_downloaded', 'background'),
+                      ('download_state_downloaded', 'surface'),
+                      ('network_online', 'background'), ('network_online', 'surface')]
             for fg, bg in pairs:
                 with self.subTest(mode=folder, pair=(fg, bg)):
                     self.assertGreaterEqual(contrast(c[fg], c[bg]), 4.5)
@@ -114,7 +127,7 @@ class VisualRefreshContracts(unittest.TestCase):
 
     def test_version_only_gradle_change(self):
         p = 'app/build.gradle'
-        expected = original(p).decode().replace('versionCode 153', 'versionCode 154').replace('versionName "1.53"', 'versionName "1.54"')
+        expected = original(p).decode().replace('versionCode 153', 'versionCode 155').replace('versionName "1.53"', 'versionName "1.55"')
         self.assertEqual(expected, (ROOT/p).read_text())
 
     def test_lyrics_no_fixed_blue(self):

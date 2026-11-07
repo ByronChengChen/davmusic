@@ -1,0 +1,14 @@
+test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) ... ok
+test_all_xml_well_formed (test_visual_refresh.VisualRefreshContracts.test_all_xml_well_formed) ... ok
+test_every_light_color_has_night_value (test_visual_refresh.VisualRefreshContracts.test_every_light_color_has_night_value) ... ok
+test_layout_structure_actions_and_touch_geometry_unchanged (test_visual_refresh.VisualRefreshContracts.test_layout_structure_actions_and_touch_geometry_unchanged) ... ok
+test_local_resource_references_resolve (test_visual_refresh.VisualRefreshContracts.test_local_resource_references_resolve) ... ok
+test_lyrics_no_fixed_blue (test_visual_refresh.VisualRefreshContracts.test_lyrics_no_fixed_blue) ... ok
+test_protected_files_and_nonvisual_java_unchanged (test_visual_refresh.VisualRefreshContracts.test_protected_files_and_nonvisual_java_unchanged) ... ok
+test_target_palette (test_visual_refresh.VisualRefreshContracts.test_target_palette) ... ok
+test_version_only_gradle_change (test_visual_refresh.VisualRefreshContracts.test_version_only_gradle_change) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.119s
+
+OK

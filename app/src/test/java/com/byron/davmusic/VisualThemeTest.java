@@ -59,6 +59,13 @@ public class VisualThemeTest {
         assertEquals(!night, lightBars.data != 0);
         TextView title = inflate(c, R.layout.item_file).findViewById(R.id.fileNameTextView);
         assertEquals(c.getColor(R.color.text_primary), title.getCurrentTextColor());
+        assertEquals(c.getColor(R.color.text_primary), c.getColor(R.color.download_state_downloaded));
+        assertEquals(c.getColor(R.color.text_secondary), c.getColor(R.color.network_online));
+        TextView online = inflate(c, R.layout.activity_main).findViewById(R.id.networkStatusTextView);
+        assertEquals(c.getColor(R.color.text_secondary), online.getCurrentTextColor());
+        assertEquals(c.getColor(R.color.error), c.getColor(R.color.network_offline));
+        assertEquals(c.getColor(R.color.accent), c.getColor(R.color.item_playing_text));
+        assertEquals(c.getColor(R.color.accent), c.getColor(R.color.player_progress_foreground));
     }
 
     @Test public void allLayoutsInflateInLightTheme() { allLayouts(false); }

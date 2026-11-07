@@ -23,12 +23,12 @@
     <color name="text_primary">#1C1C1E</color>
     <color name="text_secondary">#6E6E73</color>
     <color name="text_disabled">#98989E</color>
-    <color name="download_state_downloaded">#287848</color>
+    <color name="download_state_downloaded">@color/text_primary</color>
     <color name="download_state_downloading">#C92C48</color>
     <color name="download_state_not_downloaded">#6E6E73</color>
     <color name="item_playing_background">#FCE8ED</color>
     <color name="item_playing_text">#C92C48</color>
-    <color name="network_online">#287848</color>
+    <color name="network_online">@color/text_secondary</color>
     <color name="network_offline">#BD203C</color>
     <color name="network_wifi">#C92C48</color>
     <color name="network_mobile">#926000</color>

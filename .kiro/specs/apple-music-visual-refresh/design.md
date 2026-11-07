@@ -33,6 +33,8 @@ components:
 | surface / toolbar_background | #FFFFFF | #1C1C1E | 内容/菜单/弹窗/顶栏 |
 | text_primary / toolbar_text | #1C1C1E | #F5F5F7 | 主文字 |
 | text_secondary | #6E6E73 | #A1A1A6 | 辅助文字 |
+| download_state_downloaded | @color/text_primary | @color/text_primary | 已下载/下载中非播放歌曲名保持正文可读性 |
+| network_online | @color/text_secondary | @color/text_secondary | 在线标签、服务器成功/在线文字使用中性灰 |
 | player_background | #FFFFFF | #2C2C2E | 共享播放条 |
 | item_playing_background | #FCE8ED | #3A1822 | 当前播放行 |
 | lyrics_background / lyrics_header | #161619 | #161619 | 固定深色歌词，保留现有夜间体验 |
@@ -62,4 +64,6 @@ Android sans-serif；工具栏 20sp medium、配置标题保留 24sp、普通行
 不换导航、不添加封面/标签/控件、不变按钮文案及次序；不改 MusicPlayer、MusicService、网络、缓存和排序。禁止将静态 XML 对比当作真实 inflate 或将未执行 CI 称为通过。
 
 ## Test design
+v1.55：先扩充现有 Python palette/对比度契约与 Robolectric 真实资源/在线 TextView 断言，再将上述两个角色改为语义别名。审计全部 Java/XML 引用：network_wifi / network_mobile 及 teal 遗留色未使用，保留不动；不扩大为颜色清理。Python 只证明静态契约，真实资源解析及控件颜色由 CI 执行。
+
 先将当前布局/菜单的非视觉树、保护文件 hash、Java 规范化视觉调用后的 hash 保存为静态基线；对目标 palette/对比度编写 RED。再实施 GREEN。CI 的 VisualThemeTest 真实 inflate 五页面、三弹窗、四行布局和共享条；两种配置分别测；附菜单及播放条 click 和 AlertDialog 交互测试。本地只执行 Python，不安装 SDK 或运行 Gradle。报告保留完整命令/输出和未执行 CI 列表。
