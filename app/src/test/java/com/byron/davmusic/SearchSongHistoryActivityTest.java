@@ -22,6 +22,8 @@ public class SearchSongHistoryActivityTest {
     private SearchSongHistoryStore store;
     private RecyclerView list;
     @Before public void setup() throws Exception {
+        Field singleton=MusicPlayer.class.getDeclaredField("instance"); singleton.setAccessible(true); singleton.set(null,null);
+        org.robolectric.shadows.ShadowMediaPlayer.setMediaInfoProvider(source -> new org.robolectric.shadows.ShadowMediaPlayer.MediaInfo(180000, 0));
         android.app.Application app = RuntimeEnvironment.getApplication();
         ServerStore.prefs(app).edit().clear().commit();
         server = new ServerProfile("history-owner","History","https://example.invalid/dav/","user","password");
@@ -33,7 +35,7 @@ public class SearchSongHistoryActivityTest {
         activity=Robolectric.buildActivity(SearchActivity.class).create().get();
         list=activity.findViewById(R.id.searchResults);
     }
-    @After public void cleanup() { activity.onDestroy(); player.release(); }
+    @After public void cleanup() { if(activity!=null) activity.onDestroy(); if(player!=null) player.release(); }
     private void idle() { Shadows.shadowOf(Looper.getMainLooper()).idle(); }
     private View control(String name) { int id=activity.getResources().getIdentifier(name,"id",activity.getPackageName()); assertTrue("control "+name,id!=0); return activity.findViewById(id); }
     @SuppressWarnings({"rawtypes","unchecked"}) private RecyclerView.ViewHolder row(int position) {
