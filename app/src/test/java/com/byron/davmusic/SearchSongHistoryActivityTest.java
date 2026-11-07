@@ -98,6 +98,7 @@ public class SearchSongHistoryActivityTest {
     @Test public void deletingHistoryDoesNotResetActiveAudioInstancePositionOrPlayState() throws Exception {
         File local=File.createTempFile("history-active",".mp3",activity.getCacheDir());
         LocalCacheManager.getInstance(activity).markFileDownloaded(a.getCacheKey(),local); idle();
+        Method init=MusicPlayer.class.getDeclaredMethod("initMediaPlayer"); init.setAccessible(true); init.invoke(player);
         row(1).itemView.performClick(); idle();
         Field mediaField=MusicPlayer.class.getDeclaredField("mediaPlayer"); mediaField.setAccessible(true);
         android.media.MediaPlayer media=(android.media.MediaPlayer)mediaField.get(player);
