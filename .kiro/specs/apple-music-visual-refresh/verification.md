@@ -20,6 +20,12 @@
 
 **未运行任何本地 Gradle/Android 构建，也未 commit/push/触发远端。** 因而新增 Robolectric 类没有编译或执行证据；Android 资源链接、完整 Java 符号解析、运行时主题属性/弹窗 window、APK 安装、设备外观均尚未验证。
 
+## 获授权后的首次云端执行
+- 已获本轮提交/推送/构建授权，首次 run： https://github.com/ByronChengChen/davmusic/actions/runs/42382123360 （d45bb522cf9a9466f42d6f1a533f9699dddc5133）。
+- 资源链接、生产与测试 Java 编译成功；123 tests / 1 failed。HTML 确认弹窗点击后计数仍为 0，且提示 Main looper 有未执行 runnable：AppCompat 弹窗按钮经 Handler 异步分发，测试立即断言过早。
+- 仅在测试点击后 idle main looper，保留原确认次数断言；生产代码不变。后续成功 run / APK 校验在仓库外的交付验证报告记录，避免为结果文档重复触发构建。
+- host-red.txt 仅清理两行尾随空格，不改变原失败内容。
+
 ## 获授权后的云端门禁
 在现有 GitHub runner（JDK17 + Android34 SDK）先执行：
 

@@ -1,5 +1,5 @@
 $ python3 -m unittest discover -s tools -p test_visual_refresh.py -v
-test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) ... 
+test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) ...
   test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values', pair=('text_primary', 'background')) ... FAIL
   test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values', pair=('text_secondary', 'background')) ... FAIL
   test_accessible_text_pairs (test_visual_refresh.VisualRefreshContracts.test_accessible_text_pairs) (mode='values', pair=('text_primary', 'surface')) ... FAIL
@@ -24,7 +24,7 @@ test_every_light_color_has_night_value (test_visual_refresh.VisualRefreshContrac
 test_layout_structure_actions_and_touch_geometry_unchanged (test_visual_refresh.VisualRefreshContracts.test_layout_structure_actions_and_touch_geometry_unchanged) ... ok
 test_lyrics_no_fixed_blue (test_visual_refresh.VisualRefreshContracts.test_lyrics_no_fixed_blue) ... FAIL
 test_protected_files_and_nonvisual_java_unchanged (test_visual_refresh.VisualRefreshContracts.test_protected_files_and_nonvisual_java_unchanged) ... FAIL
-test_target_palette (test_visual_refresh.VisualRefreshContracts.test_target_palette) ... 
+test_target_palette (test_visual_refresh.VisualRefreshContracts.test_target_palette) ...
   test_target_palette (test_visual_refresh.VisualRefreshContracts.test_target_palette) (folder='values') ... FAIL
   test_target_palette (test_visual_refresh.VisualRefreshContracts.test_target_palette) (folder='values-night') ... FAIL
 test_version_only_gradle_change (test_visual_refresh.VisualRefreshContracts.test_version_only_gradle_change) ... FAIL

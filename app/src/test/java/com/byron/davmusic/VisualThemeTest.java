@@ -123,6 +123,8 @@ public class VisualThemeTest {
             assertNotNull(dialog.findViewById(R.id.editServerUrl));
             assertNotNull(dialog.getButton(AlertDialog.BUTTON_NEGATIVE));
             assertTrue(dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick());
+            // AppCompat dispatches the dialog listener through its main-thread Handler.
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
             assertEquals(1, confirmed.get());
             dialog.dismiss();
         }
