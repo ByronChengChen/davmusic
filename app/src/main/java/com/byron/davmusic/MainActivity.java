@@ -273,7 +273,7 @@ public class MainActivity extends AppCompatActivity implements
         // 恢复上次的导航位置（Activity 被系统回收后重建时，
         // 若不恢复会退回根目录，表现为"切回前台回到首页"）
         boolean restored = restoreNavState(savedInstanceState);
-        boolean openedHistoryDirectory = !restored && openHistoryDirectoryIntent();
+        boolean openedHistoryDirectory = openHistoryDirectoryIntent();
         // Restore only when the directory's matching data arrives; empty listings do not consume it.
         fileListAdapter.registerAdapterDataObserver(new RecyclerView.AdapterDataObserver() {
             @Override public void onChanged() {
@@ -2782,6 +2782,14 @@ public class MainActivity extends AppCompatActivity implements
     @Override
     protected void onNewIntent(android.content.Intent intent) {
         super.onNewIntent(intent);
+        setIntent(intent);
+        if (openHistoryDirectoryIntent()) {
+            returningFromSearch = false;
+            pendingScrollState = null;
+            searchReturnState = null;
+            loadCurrentPath();
+            return;
+        }
         // singleTask 模式下复用实例时会走这里，而不是重新 onCreate。
         // 此时导航状态与播放状态都是现成的，只需重新对齐一次 UI。
         if (rlog != null) rlog.i(TAG, "onNewIntent（复用已有实例）");

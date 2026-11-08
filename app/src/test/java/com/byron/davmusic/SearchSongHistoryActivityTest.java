@@ -1,5 +1,6 @@
 package com.byron.davmusic;
 
+import android.content.Intent;
 import android.os.Looper;
 import android.view.View;
 import android.widget.EditText;
@@ -95,12 +96,22 @@ public class SearchSongHistoryActivityTest {
         int width = (int) (360 * activity.getResources().getDisplayMetrics().density);
         item.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
-        item.layout(0, 0, width, item.getMeasuredHeight());
+        int heightBefore = item.getMeasuredHeight();
         assertEquals(View.GONE,actions.getVisibility());
         assertTrue(arrow.performClick()); idle();
+        item.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+        item.layout(0, 0, width, item.getMeasuredHeight());
+        assertEquals(heightBefore, item.getMeasuredHeight());
         assertEquals(View.VISIBLE,actions.getVisibility());
         assertTrue(text.getTranslationX() < 0f);
         assertEquals(View.VISIBLE,item.findViewById(R.id.searchHistoryEnterDirectory).getVisibility());
+        item.findViewById(R.id.searchHistoryEnterDirectory).performClick();
+        Intent launched = Shadows.shadowOf(activity).getNextStartedActivity();
+        assertNotNull(launched);
+        assertEquals(MainActivity.class.getName(),launched.getComponent().getClassName());
+        assertEquals(server.getId(),launched.getStringExtra("search_history_server_id"));
+        assertEquals(a.getRelativePath(),launched.getStringExtra("search_history_path"));
         assertEquals(View.VISIBLE,item.findViewById(R.id.searchHistoryDelete).getVisibility());
         assertQueueUnchanged();
     }

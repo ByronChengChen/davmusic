@@ -90,15 +90,17 @@ class VisualRefreshContracts(unittest.TestCase):
             for p in (RES / folder).glob('*.xml'):
                 with self.subTest(file=p.name):
                     if p.name == 'item_search_result.xml':
-                        # v1.57 explicitly approves moving delete beside the text.
-                        # Keep the original text widgets/attributes intact; new geometry
-                        # is checked by test_search_history_layout + Robolectric.
+                        # v1.58 adds compact icon actions and single-line truncation;
+                        # preserve the original three text widgets and their stable IDs.
                         before = ET.fromstring(original(str(p.relative_to(ROOT))))
                         after = ET.parse(p).getroot()
-                        for old in before.iter('TextView'):
-                            current = next(e for e in after.iter('TextView')
-                                           if e.get(A+'id') == old.get(A+'id'))
-                            self.assertEqual(tree_contract(old), tree_contract(current))
+                        old_ids = [e.get(A+'id') for e in before.iter('TextView')]
+                        new_text = list(after.iter('TextView'))
+                        self.assertEqual(old_ids, [e.get(A+'id') for e in new_text])
+                        for e in new_text:
+                            self.assertEqual('1', e.get(A+'maxLines'))
+                            self.assertEqual('end', e.get(A+'ellipsize'))
+                        self.assertEqual('searchSongText', after[0].get(A+'id').split('/')[-1])
                         continue
                     self.assertEqual(tree_contract(ET.fromstring(original(str(p.relative_to(ROOT))))),
                                      tree_contract(ET.parse(p).getroot()))
@@ -156,7 +158,7 @@ class VisualRefreshContracts(unittest.TestCase):
 
     def test_version_only_gradle_change(self):
         p = 'app/build.gradle'
-        expected = original(p).decode().replace('versionCode 153', 'versionCode 158').replace('versionName "1.53"', 'versionName "1.58"')
+        expected = original(p).decode().replace('versionCode 153', 'versionCode 159').replace('versionName "1.53"', 'versionName "1.59"')
         self.assertEqual(expected, (ROOT/p).read_text())
 
     def test_lyrics_no_fixed_blue(self):
