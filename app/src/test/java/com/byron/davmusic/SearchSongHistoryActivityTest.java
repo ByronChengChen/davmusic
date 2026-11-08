@@ -109,7 +109,7 @@ public class SearchSongHistoryActivityTest {
         assertNotNull(launched);
         assertEquals(MainActivity.class.getName(),launched.getComponent().getClassName());
         assertEquals(server.getId(),launched.getStringExtra("search_history_server_id"));
-        assertEquals(a.getRelativePath(),launched.getStringExtra("search_history_path"));
+        assertEquals(b.getRelativePath(),launched.getStringExtra("search_history_path"));
         assertEquals(View.VISIBLE,item.findViewById(R.id.searchHistoryDelete).getVisibility());
         assertQueueUnchanged();
     }
