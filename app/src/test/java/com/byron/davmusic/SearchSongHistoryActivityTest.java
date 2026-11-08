@@ -86,7 +86,8 @@ public class SearchSongHistoryActivityTest {
         assertEquals(b.getCacheKey(),player.getPlaylist().get(0).getCacheKey());
         assertEquals(a.getCacheKey(),player.getPlaylist().get(1).getCacheKey());
         assertEquals(a.getCacheKey(),player.getCurrentTrack().getCacheKey());
-        assertEquals(a.getCacheKey(),store.list(Collections.singletonList(server)).get(0).getCacheKey());
+        assertEquals(b.getCacheKey(),store.list(Collections.singletonList(server)).get(0).getCacheKey());
+        assertEquals(a.getCacheKey(),store.list(Collections.singletonList(server)).get(1).getCacheKey());
     }
     @Test public void expandedHistoryRowSlidesTextAndRevealsDirectoryAndDeleteActions() {
         View item = row(0).itemView;
@@ -162,6 +163,9 @@ public class SearchSongHistoryActivityTest {
     }
     @Test public void searchResultClickStillCapturesFullDisplayedQueue() throws Exception {
         ((EditText)activity.findViewById(R.id.searchQuery)).setText("one");
+        Field wf=SearchActivity.class.getDeclaredField("worker"); wf.setAccessible(true);
+        ((java.util.concurrent.ExecutorService)wf.get(activity)).submit(() -> {}).get(5,java.util.concurrent.TimeUnit.SECONDS);
+        idle();
         Field af=SearchActivity.class.getDeclaredField("adapter"); af.setAccessible(true); Object adapter=af.get(activity);
         Method set=adapter.getClass().getDeclaredMethod("setFiles",List.class); set.setAccessible(true); set.invoke(adapter,Arrays.asList(a,b));
         RecyclerView.ViewHolder searchRow = row(0);
