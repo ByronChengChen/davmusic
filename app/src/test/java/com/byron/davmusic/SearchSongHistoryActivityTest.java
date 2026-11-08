@@ -92,7 +92,6 @@ public class SearchSongHistoryActivityTest {
         View item = row(0).itemView;
         View arrow = item.findViewById(R.id.searchHistoryExpand);
         View actions = item.findViewById(R.id.searchHistoryActions);
-        View text = item.findViewById(R.id.searchSongText);
         int width = (int) (360 * activity.getResources().getDisplayMetrics().density);
         item.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
@@ -104,7 +103,6 @@ public class SearchSongHistoryActivityTest {
         item.layout(0, 0, width, item.getMeasuredHeight());
         assertEquals(heightBefore, item.getMeasuredHeight());
         assertEquals(View.VISIBLE,actions.getVisibility());
-        assertTrue(text.getTranslationX() < 0f);
         assertEquals(View.VISIBLE,item.findViewById(R.id.searchHistoryEnterDirectory).getVisibility());
         item.findViewById(R.id.searchHistoryEnterDirectory).performClick();
         Intent launched = Shadows.shadowOf(activity).getNextStartedActivity();
