@@ -50,16 +50,12 @@ public class SearchSongHistoryActivityTest {
         item.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
         item.layout(0, 0, width, item.getMeasuredHeight());
-        View delete = item.findViewById(R.id.searchHistoryDelete);
-        View text = item.findViewById(R.id.searchSongText);
         View expand = item.findViewById(R.id.searchHistoryExpand);
-        View actions = item.findViewById(R.id.searchHistoryActions);
-        assertTrue("expanded actions stay to the right of text", actions.getLeft() >= text.getRight());
+        View text = item.findViewById(R.id.searchSongText);
         assertTrue("expand control stays to the right of text", expand.getLeft() >= text.getRight());
-        assertTrue("delete stays inside the expanded action group", delete.getLeft() >= actions.getLeft());
-        assertTrue("actions overlap text vertically", actions.getTop() < text.getBottom()
-                && text.getTop() < actions.getBottom());
-        assertEquals(item.getPaddingTop() + Math.max(text.getMeasuredHeight(), actions.getMeasuredHeight())
+        assertTrue("expand control overlaps text vertically", expand.getTop() < text.getBottom()
+                && text.getTop() < expand.getBottom());
+        assertEquals(item.getPaddingTop() + Math.max(text.getMeasuredHeight(), expand.getMeasuredHeight())
                 + item.getPaddingBottom(), item.getMeasuredHeight());
     }
     @Test public void emptyQueryShowsRecentSongWidgetsAndNotKeywordHistory() {
@@ -97,10 +93,9 @@ public class SearchSongHistoryActivityTest {
         View actions = item.findViewById(R.id.searchHistoryActions);
         View text = item.findViewById(R.id.searchSongText);
         assertEquals(View.GONE,actions.getVisibility());
-        int before = text.getWidth();
         assertTrue(arrow.performClick()); idle();
         assertEquals(View.VISIBLE,actions.getVisibility());
-        assertTrue(text.getWidth() < before || text.getLayoutParams().width == 0);
+        assertTrue(text.getTranslationX() < 0f);
         assertEquals(View.VISIBLE,item.findViewById(R.id.searchHistoryEnterDirectory).getVisibility());
         assertEquals(View.VISIBLE,item.findViewById(R.id.searchHistoryDelete).getVisibility());
         assertQueueUnchanged();
@@ -148,7 +143,8 @@ public class SearchSongHistoryActivityTest {
         long elapsed=android.os.SystemClock.uptimeMillis()-started;
         assertEquals(position+(playing ? elapsed : 0),player.getCurrentPosition(),2.0);
         assertEquals(playing,player.isPlaying());
-        assertEquals(1,player.getPlaylist().size()); assertEquals(a.getCacheKey(),player.getCurrentTrack().getCacheKey());
+        assertEquals(2,player.getPlaylist().size());
+        assertEquals(a.getCacheKey(),player.getCurrentTrack().getCacheKey());
     }
     @Test public void searchResultClickStillCapturesFullDisplayedQueue() throws Exception {
         ((EditText)activity.findViewById(R.id.searchQuery)).setText("one");

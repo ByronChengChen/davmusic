@@ -243,6 +243,8 @@ public class SearchActivity extends AppCompatActivity implements MusicPlayer.OnP
             holder.expand.setOnClickListener(v -> {
                 if (!boundHistory || !historyMode) return;
                 holder.actionsExpanded = !holder.actionsExpanded;
+                holder.remove.setVisibility(holder.actionsExpanded ? View.VISIBLE : View.GONE);
+                holder.enterDirectory.setVisibility(holder.actionsExpanded ? View.VISIBLE : View.GONE);
                 animateHistoryActions(holder, holder.actionsExpanded);
             });
             holder.enterDirectory.setOnClickListener(v -> {
