@@ -80,10 +80,22 @@ final class SearchSongHistoryStore {
                     || !valid(f.getServerId(), f.getRelativePath()) || f.isCollection() || !f.isAudio()
                     || f.getDisplayName() == null || f.getDisplayName().isEmpty() || f.getDisplayName().length() > 2048) return false;
             List<Entry> entries = read();
-            entries.removeIf(e -> e.id.equals(f.getServerId()) && e.path.equals(f.getRelativePath()));
-            entries.add(0, new Entry(f.getServerId(), f.getRelativePath(), f.getDisplayName(),
-                    f.getContentType() != null && f.getContentType().startsWith("audio/") ? "audio/*" : "", scope(server)));
-            while (entries.size() > LIMIT) entries.remove(entries.size() - 1);
+            Entry existing = null;
+            for (Entry entry : entries) {
+                if (entry.id.equals(f.getServerId()) && entry.path.equals(f.getRelativePath())) {
+                    existing = entry;
+                    break;
+                }
+            }
+            if (existing == null) {
+                entries.add(0, new Entry(f.getServerId(), f.getRelativePath(), f.getDisplayName(),
+                        f.getContentType() != null && f.getContentType().startsWith("audio/") ? "audio/*" : "", scope(server)));
+                while (entries.size() > LIMIT) entries.remove(entries.size() - 1);
+            } else {
+                existing.name = f.getDisplayName();
+                existing.mime = f.getContentType() != null && f.getContentType().startsWith("audio/") ? "audio/*" : "";
+                existing.scope = scope(server);
+            }
             return write(entries);
         }
     }

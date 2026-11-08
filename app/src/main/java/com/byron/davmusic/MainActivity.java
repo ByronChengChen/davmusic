@@ -91,6 +91,8 @@ public class MainActivity extends AppCompatActivity implements
     private ServerProfile currentServer;
     private boolean isOfflineMode = false;
     private android.os.Parcelable searchReturnState;
+    private String pendingLocateRelativePath;
+    private String pendingLocateServerId;
     private boolean returningFromSearch;
     private Bundle pendingScrollState;
     // Only active ancestors are retained: backing out consumes one entry, not a history cache.
@@ -273,14 +275,15 @@ public class MainActivity extends AppCompatActivity implements
         // 恢复上次的导航位置（Activity 被系统回收后重建时，
         // 若不恢复会退回根目录，表现为"切回前台回到首页"）
         boolean restored = restoreNavState(savedInstanceState);
-        boolean openedHistoryDirectory = openHistoryDirectoryIntent();
+        openHistoryDirectoryIntent();
         // Restore only when the directory's matching data arrives; empty listings do not consume it.
         fileListAdapter.registerAdapterDataObserver(new RecyclerView.AdapterDataObserver() {
             @Override public void onChanged() {
                 restoreScrollPos(pendingScrollState);
+                locatePendingSearchTrack();
             }
         });
-        if (!openedHistoryDirectory) loadCurrentPath();
+        loadCurrentPath();
 
         // 若此前已在播放（服务仍在运行），确保前台服务处于活动状态。
         // 这样即便 Activity 被回收重建，保活链条也不会断。
@@ -470,6 +473,11 @@ public class MainActivity extends AppCompatActivity implements
         }
         currentServer = server;
         currentPath = directory;
+        if (intent.getBooleanExtra("search_history_locate", false)) {
+            pendingLocateServerId = serverId;
+            pendingLocateRelativePath = relativePath;
+        }
+        intent.removeExtra("search_history_locate");
         intent.removeExtra("search_history_server_id");
         intent.removeExtra("search_history_path");
         return true;
@@ -2777,6 +2785,32 @@ public class MainActivity extends AppCompatActivity implements
             pendingScrollState = null;
             searchReturnState = null;
         });
+    }
+
+    private void locatePendingSearchTrack() {
+        if (pendingLocateServerId == null || pendingLocateRelativePath == null
+                || !pendingLocateServerId.equals(currentServer == null ? null : currentServer.getId())) return;
+        List<WebDAVFile> files = fileListAdapter == null ? null : fileListAdapter.getFiles();
+        if (files == null || files.isEmpty()) return;
+        for (int i = 0; i < files.size(); i++) {
+            WebDAVFile file = files.get(i);
+            if (pendingLocateServerId.equals(file.getServerId())
+                    && pendingLocateRelativePath.equals(file.getRelativePath())) {
+                final int target = i;
+                recyclerView.post(() -> {
+                    if (pendingLocateServerId == null || target >= fileListAdapter.getItemCount()) return;
+                    WebDAVFile row = fileListAdapter.getFiles().get(target);
+                    if (pendingLocateServerId.equals(row.getServerId())
+                            && pendingLocateRelativePath.equals(row.getRelativePath())) {
+                        recyclerView.scrollToPosition(target);
+                        toast(getString(R.string.msg_located_track, row.getDisplayName()));
+                        pendingLocateServerId = null;
+                        pendingLocateRelativePath = null;
+                    }
+                });
+                return;
+            }
+        }
     }
 
     @Override

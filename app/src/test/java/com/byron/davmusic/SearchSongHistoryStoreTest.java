@@ -20,9 +20,12 @@ public class SearchSongHistoryStoreTest {
     private List<WebDAVFile> list() { return store.list(Arrays.asList(a,b)); }
     private void record(String id, String path) { assertTrue(store.record(SearchSongHistoryChecks.song(id,path), id.equals("a") ? a : b)); }
     @Test public void restartRetainsOnlySafeIdentity() throws Exception { SearchSongHistoryChecks.restart(dir); }
-    @Test public void repeatedClickMovesOnlyThatIdentityToFront() {
+    @Test public void repeatedClickDoesNotReorderExistingHistoryEntry() {
         record("a","one.mp3"); record("a","two.mp3"); record("a","one.mp3");
-        assertEquals(2,list().size()); assertEquals("a:one.mp3",list().get(0).getCacheKey());
+        assertEquals(2,list().size()); assertEquals("a:two.mp3",list().get(0).getCacheKey());
+        assertEquals("a:one.mp3",list().get(1).getCacheKey());
+        record("a","three.mp3"); assertEquals("a:three.mp3",list().get(0).getCacheKey());
+        assertEquals("a:two.mp3",list().get(1).getCacheKey());
     }
     @Test public void newestFiftySurviveRestart() {
         for(int i=0;i<55;i++) record("a",i+".mp3");

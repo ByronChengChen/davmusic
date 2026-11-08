@@ -158,7 +158,7 @@ class VisualRefreshContracts(unittest.TestCase):
 
     def test_version_only_gradle_change(self):
         p = 'app/build.gradle'
-        expected = original(p).decode().replace('versionCode 153', 'versionCode 159').replace('versionName "1.53"', 'versionName "1.59"')
+        expected = original(p).decode().replace('versionCode 153', 'versionCode 160').replace('versionName "1.53"', 'versionName "1.60"')
         self.assertEqual(expected, (ROOT/p).read_text())
 
     def test_lyrics_no_fixed_blue(self):

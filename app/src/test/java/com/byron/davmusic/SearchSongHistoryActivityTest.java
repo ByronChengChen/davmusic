@@ -110,6 +110,7 @@ public class SearchSongHistoryActivityTest {
         assertEquals(MainActivity.class.getName(),launched.getComponent().getClassName());
         assertEquals(server.getId(),launched.getStringExtra("search_history_server_id"));
         assertEquals(b.getRelativePath(),launched.getStringExtra("search_history_path"));
+        assertTrue(launched.getBooleanExtra("search_history_locate",false));
         assertEquals(View.VISIBLE,item.findViewById(R.id.searchHistoryDelete).getVisibility());
         assertQueueUnchanged();
     }
@@ -163,6 +164,16 @@ public class SearchSongHistoryActivityTest {
         ((EditText)activity.findViewById(R.id.searchQuery)).setText("one");
         Field af=SearchActivity.class.getDeclaredField("adapter"); af.setAccessible(true); Object adapter=af.get(activity);
         Method set=adapter.getClass().getDeclaredMethod("setFiles",List.class); set.setAccessible(true); set.invoke(adapter,Arrays.asList(a,b));
+        RecyclerView.ViewHolder searchRow = row(0);
+        View searchExpand = searchRow.itemView.findViewById(R.id.searchHistoryExpand);
+        assertEquals(View.VISIBLE,searchExpand.getVisibility());
+        searchExpand.performClick(); idle();
+        searchRow.itemView.findViewById(R.id.searchHistoryEnterDirectory).performClick();
+        Intent launched = Shadows.shadowOf(activity).getNextStartedActivity();
+        assertNotNull(launched);
+        assertEquals(server.getId(),launched.getStringExtra("search_history_server_id"));
+        assertEquals(a.getRelativePath(),launched.getStringExtra("search_history_path"));
+        assertTrue(launched.getBooleanExtra("search_history_locate",false));
         File local=File.createTempFile("search-play",".mp3",activity.getCacheDir()); LocalCacheManager.getInstance(activity).markFileDownloaded(b.getCacheKey(),local);
         row(1).itemView.performClick(); assertEquals(2,player.getPlaylist().size()); assertEquals(b.getCacheKey(),player.getCurrentTrack().getCacheKey());
         assertEquals(b.getCacheKey(),store.list(Collections.singletonList(server)).get(0).getCacheKey());

@@ -237,20 +237,20 @@ public class SearchActivity extends AppCompatActivity implements MusicPlayer.OnP
                 if (boundHistory == historyMode && adapter.files.contains(file)) play(file);
             });
             holder.remove.setVisibility(View.GONE);
-            holder.expand.setVisibility(boundHistory ? View.VISIBLE : View.GONE);
+            holder.expand.setVisibility(View.VISIBLE);
             holder.actions.setVisibility(View.GONE);
             holder.enterDirectory.setVisibility(View.GONE);
             holder.remove.setVisibility(View.GONE);
             holder.actionsExpanded = false;
             holder.expand.setOnClickListener(v -> {
-                if (!boundHistory || !historyMode) return;
+                if (boundHistory != historyMode || !adapter.files.contains(file)) return;
                 holder.actionsExpanded = !holder.actionsExpanded;
-                holder.remove.setVisibility(holder.actionsExpanded ? View.VISIBLE : View.GONE);
+                holder.remove.setVisibility(holder.actionsExpanded && boundHistory ? View.VISIBLE : View.GONE);
                 holder.enterDirectory.setVisibility(holder.actionsExpanded ? View.VISIBLE : View.GONE);
                 animateHistoryActions(holder, holder.actionsExpanded);
             });
             holder.enterDirectory.setOnClickListener(v -> {
-                if (!boundHistory || !historyMode || !adapter.files.contains(file)) return;
+                if (boundHistory != historyMode || !adapter.files.contains(file)) return;
                 ServerProfile target = null;
                 for (ServerProfile server : ServerStore.list(SearchActivity.this))
                     if (server.getId().equals(file.getServerId()) && server.isComplete()) { target = server; break; }
@@ -258,6 +258,7 @@ public class SearchActivity extends AppCompatActivity implements MusicPlayer.OnP
                 Intent intent = new Intent(SearchActivity.this, MainActivity.class);
                 intent.putExtra("search_history_server_id", target.getId());
                 intent.putExtra("search_history_path", file.getRelativePath());
+                intent.putExtra("search_history_locate", true);
                 startActivity(intent);
             });
             holder.remove.setOnClickListener(v -> {
