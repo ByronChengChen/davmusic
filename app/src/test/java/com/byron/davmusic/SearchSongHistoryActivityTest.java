@@ -92,6 +92,10 @@ public class SearchSongHistoryActivityTest {
         View arrow = item.findViewById(R.id.searchHistoryExpand);
         View actions = item.findViewById(R.id.searchHistoryActions);
         View text = item.findViewById(R.id.searchSongText);
+        int width = (int) (360 * activity.getResources().getDisplayMetrics().density);
+        item.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+        item.layout(0, 0, width, item.getMeasuredHeight());
         assertEquals(View.GONE,actions.getVisibility());
         assertTrue(arrow.performClick()); idle();
         assertEquals(View.VISIBLE,actions.getVisibility());
