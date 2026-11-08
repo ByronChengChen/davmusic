@@ -4,7 +4,7 @@
     android:orientation="horizontal" android:gravity="center_vertical"
     android:minHeight="72dp" android:padding="12dp"
     android:background="@drawable/item_background">
-    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+    <LinearLayout android:id="@+id/searchSongText" android:layout_width="0dp" android:layout_height="wrap_content"
         android:layout_weight="1" android:orientation="vertical">
         <TextView android:id="@+id/searchSongTitle" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:textSize="16sp" android:textColor="@color/text_primary" />
@@ -13,6 +13,13 @@
         <TextView android:id="@+id/searchSongDownload" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:textSize="12sp" android:textColor="@color/text_secondary" />
     </LinearLayout>
-    <Button android:id="@+id/searchHistoryDelete" android:layout_width="wrap_content" android:layout_height="48dp"
-        android:layout_marginStart="8dp" android:text="@string/search_history_delete" android:visibility="gone" />
+    <Button android:id="@+id/searchHistoryExpand" android:layout_width="48dp" android:layout_height="48dp"
+        android:text="›" android:contentDescription="展开历史操作" android:visibility="gone" />
+    <LinearLayout android:id="@+id/searchHistoryActions" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="center_vertical" android:visibility="gone">
+        <Button android:id="@+id/searchHistoryEnterDirectory" android:layout_width="wrap_content" android:layout_height="48dp"
+            android:text="进入目录" />
+        <Button android:id="@+id/searchHistoryDelete" android:layout_width="wrap_content" android:layout_height="48dp"
+            android:layout_marginStart="8dp" android:text="@string/search_history_delete" />
+    </LinearLayout>
 </LinearLayout>

@@ -132,7 +132,7 @@ public class SearchActivity extends AppCompatActivity implements MusicPlayer.OnP
         if (!NetworkUtils.isNetworkConnected(this) && !cache.isDownloaded(file.getCacheKey())) {
             toast(getString(R.string.search_offline)); return;
         }
-        List<WebDAVFile> queue = historyMode ? Collections.singletonList(file) : new ArrayList<>(adapter.files);
+        List<WebDAVFile> queue = new ArrayList<>(adapter.files);
         int index = -1;
         for (int i = 0; i < queue.size(); i++)
             if (queue.get(i).getCacheKey().equals(file.getCacheKey())) { index = i; break; }
@@ -236,7 +236,26 @@ public class SearchActivity extends AppCompatActivity implements MusicPlayer.OnP
             holder.itemView.setOnClickListener(v -> {
                 if (boundHistory == historyMode && adapter.files.contains(file)) play(file);
             });
-            holder.remove.setVisibility(boundHistory ? View.VISIBLE : View.GONE);
+            holder.remove.setVisibility(View.GONE);
+            holder.expand.setVisibility(boundHistory ? View.VISIBLE : View.GONE);
+            holder.actions.setVisibility(View.GONE);
+            holder.actionsExpanded = false;
+            holder.expand.setOnClickListener(v -> {
+                if (!boundHistory || !historyMode) return;
+                holder.actionsExpanded = !holder.actionsExpanded;
+                animateHistoryActions(holder, holder.actionsExpanded);
+            });
+            holder.enterDirectory.setOnClickListener(v -> {
+                if (!boundHistory || !historyMode || !adapter.files.contains(file)) return;
+                ServerProfile target = null;
+                for (ServerProfile server : ServerStore.list(SearchActivity.this))
+                    if (server.getId().equals(file.getServerId()) && server.isComplete()) { target = server; break; }
+                if (target == null) { toast(getString(R.string.search_removed_server)); sourceChanged.run(); return; }
+                Intent intent = new Intent(SearchActivity.this, MainActivity.class);
+                intent.putExtra("search_history_server_id", target.getId());
+                intent.putExtra("search_history_path", file.getRelativePath());
+                startActivity(intent);
+            });
             holder.remove.setOnClickListener(v -> {
                 if (!historyMode || !boundHistory) return;
                 if (!history.remove(file)) toast(getString(R.string.search_history_save_error));
@@ -244,13 +263,29 @@ public class SearchActivity extends AppCompatActivity implements MusicPlayer.OnP
             });
         }
     }
+    private void animateHistoryActions(ResultHolder holder, boolean expanded) {
+        holder.actions.setVisibility(View.VISIBLE);
+        holder.actions.setAlpha(expanded ? 0f : 1f);
+        holder.actions.animate().alpha(expanded ? 1f : 0f).setDuration(180).withEndAction(() -> {
+            holder.actions.setVisibility(expanded ? View.VISIBLE : View.GONE);
+        }).start();
+        View text = holder.title.getParent() instanceof View ? (View) holder.title.getParent() : holder.title;
+        View arrow = holder.expand;
+        text.animate().translationX(expanded ? -arrow.getWidth() : 0f).setDuration(180).start();
+        holder.expand.setRotation(expanded ? 90f : 0f);
+    }
+
     private static final class ResultHolder extends RecyclerView.ViewHolder {
         final TextView title, location, download;
-        final View remove;
+        final View remove, expand, actions, enterDirectory;
+        boolean actionsExpanded;
         ResultHolder(View view) {
             super(view); title = view.findViewById(R.id.searchSongTitle);
             location = view.findViewById(R.id.searchSongLocation); download = view.findViewById(R.id.searchSongDownload);
             remove = view.findViewById(R.id.searchHistoryDelete);
+            expand = view.findViewById(R.id.searchHistoryExpand);
+            actions = view.findViewById(R.id.searchHistoryActions);
+            enterDirectory = view.findViewById(R.id.searchHistoryEnterDirectory);
         }
     }
 }

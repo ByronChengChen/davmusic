@@ -273,13 +273,14 @@ public class MainActivity extends AppCompatActivity implements
         // 恢复上次的导航位置（Activity 被系统回收后重建时，
         // 若不恢复会退回根目录，表现为"切回前台回到首页"）
         boolean restored = restoreNavState(savedInstanceState);
-        // 数据到达后恢复，而非猜测网络能在 300ms 内完成。空列表不消费状态。
+        boolean openedHistoryDirectory = !restored && openHistoryDirectoryIntent();
+        // Restore only when the directory's matching data arrives; empty listings do not consume it.
         fileListAdapter.registerAdapterDataObserver(new RecyclerView.AdapterDataObserver() {
             @Override public void onChanged() {
                 restoreScrollPos(pendingScrollState);
             }
         });
-        loadCurrentPath();
+        if (!openedHistoryDirectory) loadCurrentPath();
 
         // 若此前已在播放（服务仍在运行），确保前台服务处于活动状态。
         // 这样即便 Activity 被回收重建，保活链条也不会断。
@@ -449,6 +450,31 @@ public class MainActivity extends AppCompatActivity implements
     }
     
     /** 进入某台服务器：清空导航状态，从它的根目录开始浏览 */
+    private boolean openHistoryDirectoryIntent() {
+        Intent intent = getIntent();
+        String serverId = intent.getStringExtra("search_history_server_id");
+        String relativePath = intent.getStringExtra("search_history_path");
+        if (serverId == null || relativePath == null || relativePath.isEmpty()) return false;
+        ServerProfile server = findServerById(serverId);
+        if (server == null || !server.isComplete()) return false;
+        String[] parts = relativePath.split("/");
+        if (parts.length < 2) return false;
+        String directory = "/";
+        pathStack.clear();
+        parentScrollStates.clear();
+        for (int i = 0; i < parts.length - 1; i++) {
+            if (parts[i].isEmpty() || parts[i].equals(".") || parts[i].equals("..")) return false;
+            pathStack.add(directory);
+            parentScrollStates.add(null);
+            directory = directory.equals("/") ? "/" + parts[i] : directory + "/" + parts[i];
+        }
+        currentServer = server;
+        currentPath = directory;
+        intent.removeExtra("search_history_server_id");
+        intent.removeExtra("search_history_path");
+        return true;
+    }
+
     private void enterServer(ServerProfile profile) {
         if (profile == null) return;
         if (!profile.isComplete()) {

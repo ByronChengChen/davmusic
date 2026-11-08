@@ -51,11 +51,15 @@ public class SearchSongHistoryActivityTest {
                 View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
         item.layout(0, 0, width, item.getMeasuredHeight());
         View delete = item.findViewById(R.id.searchHistoryDelete);
-        View text = (View) item.findViewById(R.id.searchSongTitle).getParent();
-        assertTrue("delete stays to the right of text", delete.getLeft() >= text.getRight());
-        assertTrue("delete overlaps text vertically", delete.getTop() < text.getBottom()
-                && text.getTop() < delete.getBottom());
-        assertEquals(item.getPaddingTop() + Math.max(text.getMeasuredHeight(), delete.getMeasuredHeight())
+        View text = item.findViewById(R.id.searchSongText);
+        View expand = item.findViewById(R.id.searchHistoryExpand);
+        View actions = item.findViewById(R.id.searchHistoryActions);
+        assertTrue("expanded actions stay to the right of text", actions.getLeft() >= text.getRight());
+        assertTrue("expand control stays to the right of text", expand.getLeft() >= text.getRight());
+        assertTrue("delete stays inside the expanded action group", delete.getLeft() >= actions.getLeft());
+        assertTrue("actions overlap text vertically", actions.getTop() < text.getBottom()
+                && text.getTop() < actions.getBottom());
+        assertEquals(item.getPaddingTop() + Math.max(text.getMeasuredHeight(), actions.getMeasuredHeight())
                 + item.getPaddingBottom(), item.getMeasuredHeight());
     }
     @Test public void emptyQueryShowsRecentSongWidgetsAndNotKeywordHistory() {
@@ -76,13 +80,30 @@ public class SearchSongHistoryActivityTest {
         activity.findViewById(R.id.searchClear).performClick(); idle();
         assertEquals(2,list.getAdapter().getItemCount()); assertEquals(2,store.list(Collections.singletonList(server)).size()); assertQueueUnchanged();
     }
-    @Test public void historyClickUsesOnlyOneSongAndMovesItToFront() throws Exception {
+    @Test public void historyClickReplacesQueueWithDisplayedHistoryAndStartsTappedSong() throws Exception {
         // Local copy avoids any remote request; unsupported platform decode stays on existing error path.
         File local=File.createTempFile("history-play",".mp3",activity.getCacheDir());
         LocalCacheManager.getInstance(activity).markFileDownloaded(a.getCacheKey(),local); idle();
         row(1).itemView.performClick();
-        assertEquals(1,player.getPlaylist().size()); assertEquals(a.getCacheKey(),player.getCurrentTrack().getCacheKey());
+        assertEquals(2,player.getPlaylist().size());
+        assertEquals(b.getCacheKey(),player.getPlaylist().get(0).getCacheKey());
+        assertEquals(a.getCacheKey(),player.getPlaylist().get(1).getCacheKey());
+        assertEquals(a.getCacheKey(),player.getCurrentTrack().getCacheKey());
         assertEquals(a.getCacheKey(),store.list(Collections.singletonList(server)).get(0).getCacheKey());
+    }
+    @Test public void expandedHistoryRowSlidesTextAndRevealsDirectoryAndDeleteActions() {
+        View item = row(0).itemView;
+        View arrow = item.findViewById(R.id.searchHistoryExpand);
+        View actions = item.findViewById(R.id.searchHistoryActions);
+        View text = item.findViewById(R.id.searchSongText);
+        assertEquals(View.GONE,actions.getVisibility());
+        int before = text.getWidth();
+        assertTrue(arrow.performClick()); idle();
+        assertEquals(View.VISIBLE,actions.getVisibility());
+        assertTrue(text.getWidth() < before || text.getLayoutParams().width == 0);
+        assertEquals(View.VISIBLE,item.findViewById(R.id.searchHistoryEnterDirectory).getVisibility());
+        assertEquals(View.VISIBLE,item.findViewById(R.id.searchHistoryDelete).getVisibility());
+        assertQueueUnchanged();
     }
     @Test public void deletedServerStaleRowCannotPlayAnotherServer() {
         RecyclerView.ViewHolder stale=row(0); ServerStore.remove(activity,server.getId());

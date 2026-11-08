@@ -10,15 +10,22 @@ class SearchHistoryLayoutTest(unittest.TestCase):
     def test_delete_is_beside_text_not_below_it(self):
         row = ET.parse(ROOT / 'app/src/main/res/layout/item_search_result.xml').getroot()
         self.assertEqual('horizontal', row.get(A + 'orientation'))
-        text, delete = list(row)
+        text, expand, actions = list(row)
         self.assertEqual('vertical', text.get(A + 'orientation'))
         self.assertEqual('0dp', text.get(A + 'layout_width'))
         self.assertEqual('1', text.get(A + 'layout_weight'))
+        self.assertEqual('@+id/searchHistoryExpand', expand.get(A + 'id'))
+        self.assertEqual('48dp', expand.get(A + 'layout_height'))
+        self.assertEqual('gone', expand.get(A + 'visibility'))
+        self.assertEqual('@+id/searchHistoryActions', actions.get(A + 'id'))
+        self.assertEqual('horizontal', actions.get(A + 'orientation'))
+        self.assertEqual('gone', actions.get(A + 'visibility'))
+        enter, delete = list(actions)
+        self.assertEqual('@+id/searchHistoryEnterDirectory', enter.get(A + 'id'))
         self.assertEqual('@+id/searchHistoryDelete', delete.get(A + 'id'))
         self.assertEqual('48dp', delete.get(A + 'layout_height'))
         ids = [child.get(A + 'id') for child in text]
         self.assertEqual(['@+id/searchSongTitle', '@+id/searchSongLocation', '@+id/searchSongDownload'], ids)
-        self.assertEqual('gone', delete.get(A + 'visibility'))
 
 if __name__ == '__main__':
     unittest.main()
