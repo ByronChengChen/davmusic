@@ -3,8 +3,7 @@ package com.byron.davmusic;
 import static org.junit.Assert.*;
 import android.widget.Button;
 import android.widget.LinearLayout;
-import androidx.test.core.app.ApplicationProvider;
-import androidx.test.core.app.ActivityScenario;
+import org.robolectric.RuntimeEnvironment;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
@@ -14,7 +13,7 @@ import org.robolectric.annotation.Config;
 @Config(sdk = 34)
 public class LyricsRepeatWidgetTest {
     @Test public void activityInflatesRepeatActionsAndDeleteContainer() {
-        android.content.Context context = ApplicationProvider.getApplicationContext();
+        android.content.Context context = RuntimeEnvironment.getApplication();
         android.view.View view = android.view.LayoutInflater.from(context).inflate(R.layout.activity_lyrics, null, false);
         assertNotNull(view.findViewById(R.id.repeatSetStart));
         assertNotNull(view.findViewById(R.id.repeatSetEnd));
