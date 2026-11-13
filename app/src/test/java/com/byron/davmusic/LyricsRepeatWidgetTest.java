@@ -13,7 +13,8 @@ import org.robolectric.annotation.Config;
 @Config(sdk = 34)
 public class LyricsRepeatWidgetTest {
     @Test public void activityInflatesRepeatActionsAndDeleteContainer() {
-        android.content.Context context = RuntimeEnvironment.getApplication();
+        android.content.Context context = new android.view.ContextThemeWrapper(
+                RuntimeEnvironment.getApplication(), R.style.Theme_DavMusic);
         android.view.View view = android.view.LayoutInflater.from(context).inflate(R.layout.activity_lyrics, null, false);
         assertNotNull(view.findViewById(R.id.repeatSetStart));
         assertNotNull(view.findViewById(R.id.repeatSetEnd));
