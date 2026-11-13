@@ -58,6 +58,15 @@ public class LyricsActivity extends AppCompatActivity {
     private LinearLayout statusContainer;
     private Button searchButton;
     private boolean searching;
+    private RepeatRangeStore repeatStore;
+    private final List<RepeatRange> repeatRanges = new ArrayList<>();
+    private String repeatTrackKey;
+    private int repeatStartMs = -1;
+    private int repeatEndMs = -1;
+    private RepeatRange selectedRepeatRange;
+    private LinearLayout repeatIntervalsView;
+    private TextView repeatTimeView;
+    private Button repeatToggleButton;
 
     private PlayerBarController playerBar;
     private GestureDetector gestureDetector;
@@ -76,6 +85,15 @@ public class LyricsActivity extends AppCompatActivity {
             if (!ticking) return;
             if (player != null && SystemClock.elapsedRealtime() >= suppressHighlightUntil) {
                 updateHighlight(player.getCurrentPosition());
+                RepeatRange active = player.getRepeatController().getActive();
+                boolean repeatActive = active != null && player.getRepeatController().isActiveFor(repeatTrackKey);
+                repeatToggleButton.setText(repeatActive ? "停止" : "开始复读");
+                if (repeatActive) {
+                    selectedRepeatRange = active;
+                    repeatTimeView.setText("复读模式  " + formatTime(active.getStartMs()) + "–" + formatTime(active.getEndMs()));
+                } else {
+                    repeatTimeView.setText("复读区间  " + formatTime(player.getCurrentPosition()) + " / " + formatTime(player.getDuration()));
+                }
             }
             handler.postDelayed(this, TICK_MS);
         }
@@ -84,6 +102,15 @@ public class LyricsActivity extends AppCompatActivity {
     private final MusicPlayer.OnPlaybackListener listener = new MusicPlayer.OnPlaybackListener() {
         @Override
         public void onTrackChanged(WebDAVFile track) {
+            repeatStartMs = repeatEndMs = -1;
+            repeatTrackKey = RepeatRangeStore.key(track == null ? null : track.getServerId(), track == null ? null : track.getRelativePath());
+            repeatRanges.clear();
+            selectedRepeatRange = null;
+            repeatRanges.addAll(repeatStore.load(repeatTrackKey));
+            if (!repeatRanges.isEmpty()) selectedRepeatRange = repeatRanges.get(0);
+            RepeatRange active = player.getRepeatController().getActive();
+            if (active != null && player.getRepeatController().isActiveFor(repeatTrackKey)) selectedRepeatRange = active;
+            renderRepeatRanges();
             loadLyrics();
         }
 
@@ -112,6 +139,21 @@ public class LyricsActivity extends AppCompatActivity {
         setContentView(R.layout.activity_lyrics);
 
         player = MusicPlayer.getInstance(this);
+        repeatStore = new RepeatRangeStore(this);
+        repeatIntervalsView = findViewById(R.id.repeatIntervals);
+        repeatTimeView = findViewById(R.id.repeatTime);
+        repeatToggleButton = findViewById(R.id.repeatToggle);
+        findViewById(R.id.repeatSetStart).setOnClickListener(v -> {
+            repeatStartMs = player.getCurrentPosition();
+            repeatTimeView.setText("A 点 " + formatTime(repeatStartMs));
+        });
+        findViewById(R.id.repeatSetEnd).setOnClickListener(v -> {
+            repeatEndMs = player.getCurrentPosition();
+            repeatTimeView.setText("B 点 " + formatTime(repeatEndMs));
+        });
+        findViewById(R.id.repeatSave).setOnClickListener(v -> saveRepeatRange());
+        repeatToggleButton.setOnClickListener(v -> toggleRepeat());
+        renderRepeatRanges();
 
         trackTitle = findViewById(R.id.trackTitle);
         trackSubtitle = findViewById(R.id.trackSubtitle);
@@ -129,6 +171,7 @@ public class LyricsActivity extends AppCompatActivity {
         lyricsList.setAdapter(adapter);
 
         player.addPlaybackListener(listener);
+        listener.onTrackChanged(player.getCurrentTrack());
         playerBar = new PlayerBarController(this, findViewById(R.id.playerBar), player);
         setupDoubleTapToSeek();
         loadLyrics();
@@ -154,6 +197,74 @@ public class LyricsActivity extends AppCompatActivity {
         if (player != null) player.removePlaybackListener(listener);
         handler.removeCallbacksAndMessages(null);
         super.onDestroy();
+    }
+
+    private void saveRepeatRange() {
+        RepeatRange range = RepeatRange.create(repeatStartMs, repeatEndMs, player.getDuration());
+        if (repeatTrackKey == null || range == null) { toast("请设置有效的 A/B 点"); return; }
+        if (repeatRanges.contains(range)) { toast("该复读区间已保存"); return; }
+        repeatRanges.add(range);
+        repeatStore.save(repeatTrackKey, repeatRanges);
+        repeatStartMs = repeatEndMs = -1;
+        selectedRepeatRange = range;
+        repeatTimeView.setText("已保存 " + formatTime(range.getStartMs()) + "–" + formatTime(range.getEndMs()));
+        renderRepeatRanges();
+    }
+
+    private void toggleRepeat() {
+        if (player.getRepeatController().isActiveFor(repeatTrackKey)) { player.clearRepeatRange(); renderRepeatRanges(); return; }
+        if (repeatRanges.isEmpty() || repeatTrackKey == null || player.getDuration() <= 0) { toast("请先保存有效区间"); return; }
+        if (selectedRepeatRange == null) selectedRepeatRange = repeatRanges.get(0);
+        if (player.isPreparing()) { toast("播放器正在准备，请稍后再试"); return; }
+        int duration = player.getDuration();
+        RepeatRange valid = RepeatRange.create(selectedRepeatRange.getStartMs(), selectedRepeatRange.getEndMs(), duration);
+        if (valid == null) { toast("区间超出音频时长，请重新设定"); return; }
+        selectedRepeatRange = valid;
+        player.setRepeatRange(repeatTrackKey, valid);
+        renderRepeatRanges();
+    }
+
+    private void renderRepeatRanges() {
+        if (repeatIntervalsView == null) return;
+        repeatIntervalsView.removeAllViews();
+        for (int i = 0; i < repeatRanges.size(); i++) {
+            final int index = i;
+            RepeatRange range = repeatRanges.get(i);
+            LinearLayout row = new LinearLayout(this);
+            row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            TextView label = new TextView(this);
+            label.setText(formatTime(range.getStartMs()) + " – " + formatTime(range.getEndMs()));
+            label.setTextColor(android.graphics.Color.WHITE);
+            label.setPadding(8, 4, 8, 4);
+            row.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
+            Button select = new Button(this);
+            select.setText(selectedRepeatRange != null && selectedRepeatRange.equals(range) ? "已选择" : "选择");
+            select.setOnClickListener(v -> { selectedRepeatRange = repeatRanges.get(index); renderRepeatRanges(); });
+            row.addView(select);
+            Button delete = new Button(this);
+            delete.setText("×");
+            delete.setContentDescription("删除复读区间");
+            delete.setOnClickListener(v -> {
+                boolean deletingActive = player.getRepeatController().isActiveRange(repeatTrackKey, repeatRanges.get(index));
+                boolean deletingSelected = selectedRepeatRange != null && selectedRepeatRange.equals(repeatRanges.get(index));
+                repeatRanges.remove(index);
+                if (deletingActive) {
+                    player.clearRepeatRange();
+                    repeatToggleButton.setText("开始复读");
+                    repeatTimeView.setText("复读区间已停止");
+                }
+                if (deletingSelected) selectedRepeatRange = null;
+                repeatStore.save(repeatTrackKey, repeatRanges);
+                renderRepeatRanges();
+            });
+            row.addView(delete);
+            repeatIntervalsView.addView(row);
+        }
+    }
+
+    private static String formatTime(int ms) {
+        int seconds = Math.max(0, ms) / 1000;
+        return String.format(java.util.Locale.ROOT, "%d:%02d", seconds / 60, seconds % 60);
     }
 
     // ---------------- 歌词加载 ----------------

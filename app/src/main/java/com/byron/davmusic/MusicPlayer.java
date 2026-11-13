@@ -61,6 +61,52 @@ public class MusicPlayer {
     /** 远程日志：只记录，不影响播放逻辑 */
     private RemoteLogger rlog;
 
+    private final RepeatController repeatController = new RepeatController();
+    private static final long REPEAT_CHECK_MS = 25L;
+    private long repeatLastSeekAt;
+    private final Runnable repeatChecker = new Runnable() {
+        @Override public void run() {
+            if (!repeatController.isActive()) return;
+            if (mediaPlayer != null && !isPreparing) {
+                try {
+                    if (mediaPlayer.isPlaying()) {
+                        RepeatRange range = repeatController.getActive();
+                        long now = android.os.SystemClock.elapsedRealtime();
+                        if (range != null && mediaPlayer.getCurrentPosition() >= range.getEndMs()) {
+                            // seekTo 是异步的：位置更新前不要每 25ms 再发一次 seek。
+                            if (now - repeatLastSeekAt >= 300L) {
+                                repeatLastSeekAt = now;
+                                mediaPlayer.seekTo(range.getStartMs());
+                            }
+                        }
+                    }
+                } catch (IllegalStateException ignored) { }
+            }
+            handler.postDelayed(this, REPEAT_CHECK_MS);
+        }
+    };
+
+    public RepeatController getRepeatController() { return repeatController; }
+    public void setRepeatRange(String trackKey, RepeatRange range) {
+        if (trackKey == null || range == null || isPreparing || mediaPlayer == null) return;
+        WebDAVFile current = getCurrentTrack();
+        if (current == null || !trackKey.equals(RepeatRange.trackKey(current.getServerId(), current.getRelativePath()))) return;
+        if (getDuration() <= 0 || range.getEndMs() > getDuration()) return;
+        repeatController.select(trackKey, range);
+        repeatLastSeekAt = 0;
+        try {
+            if (getCurrentPosition() < range.getStartMs() || getCurrentPosition() >= range.getEndMs()) {
+                mediaPlayer.seekTo(range.getStartMs());
+            }
+        } catch (IllegalStateException ignored) { }
+        handler.removeCallbacks(repeatChecker);
+        if (isPlaying()) handler.post(repeatChecker);
+    }
+    public void clearRepeatRange() {
+        repeatController.onExplicitStop();
+        handler.removeCallbacks(repeatChecker);
+    }
+
     // ---- 播放模式（顺序 / 列表循环 / 单曲循环 / 随机） ----
 
     /** 顺序播放：播到列表末尾即停止 */
@@ -371,6 +417,7 @@ public class MusicPlayer {
                     applyLoopingToCurrentPlayer();
 
                     WebDAVFile now = playlist.get(currentPosition);
+                    clearRepeatRange();
                     currentUrl = resolvePlayUrl(now);
                     notifyTrackChanged(now);
                     notifyPlayStateChanged(true);
@@ -910,6 +957,7 @@ public class MusicPlayer {
     
     public void playFile(WebDAVFile file) {
         if (file == null) return;
+        clearRepeatRange();
         rlog.i(TAG, "playFile: " + file.getDisplayName()
                 + " | pos=" + currentPosition
                 + " | server=" + file.getServerName());
@@ -1035,6 +1083,7 @@ public class MusicPlayer {
      * 会抛 IllegalStateException。
      */
     public void pause() {
+        handler.removeCallbacks(repeatChecker);
         if (mediaPlayer == null) return;
         if (isPreparing) {
             // 缓冲阶段没有可暂停的内容，忽略
@@ -1066,6 +1115,10 @@ public class MusicPlayer {
         try {
             if (!mediaPlayer.isPlaying()) {
                 mediaPlayer.start();
+                if (repeatController.isActive()) {
+                    handler.removeCallbacks(repeatChecker);
+                    handler.post(repeatChecker);
+                }
                 notifyPlayStateChanged(true);
             }
         } catch (IllegalStateException e) {
@@ -1088,6 +1141,7 @@ public class MusicPlayer {
     }
 
     public void stop() {
+        clearRepeatRange();
         if (mediaPlayer != null) {
             // 标记主动中断：期间产生的 onError 属于预期行为，不上报
             intentionalStop = true;
@@ -1453,6 +1507,7 @@ public class MusicPlayer {
     }
     
     public void release() {
+        clearRepeatRange();
         releaseTransitionWakeLock();
         abandonAudioFocus();
 

@@ -101,6 +101,37 @@
         </LinearLayout>
     </FrameLayout>
 
+    <!-- A/B повтор: локальные интервалы текущей композиции -->
+    <LinearLayout
+        android:id="@+id/repeatPanel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/lyrics_header"
+        android:orientation="vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp">
+        <TextView
+            android:id="@+id/repeatTime"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="0:00 / 0:00"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+            <Button android:id="@+id/repeatSetStart" android:layout_width="0dp" android:layout_weight="1" android:layout_height="40dp" android:minWidth="0dp" android:paddingStart="2dp" android:paddingEnd="2dp" android:text="设为 A" />
+            <Button android:id="@+id/repeatSetEnd" android:layout_width="0dp" android:layout_weight="1" android:layout_height="40dp" android:minWidth="0dp" android:paddingStart="2dp" android:paddingEnd="2dp" android:text="设为 B" />
+            <Button android:id="@+id/repeatSave" android:layout_width="0dp" android:layout_weight="1" android:layout_height="40dp" android:minWidth="0dp" android:paddingStart="2dp" android:paddingEnd="2dp" android:text="保存" />
+            <Button android:id="@+id/repeatToggle" android:layout_width="0dp" android:layout_weight="1.2" android:layout_height="40dp" android:minWidth="0dp" android:paddingStart="2dp" android:paddingEnd="2dp" android:text="开始复读" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/repeatIntervals" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+    </LinearLayout>
+
     <!-- 播放控制条：与主界面共用，跟随系统浅深色。 -->
     <include
         android:id="@+id/playerBar"

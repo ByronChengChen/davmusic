@@ -25,7 +25,10 @@ def tree_contract(node):
     return (node.tag, sorted((k, v) for k, v in node.attrib.items()
                             if k.split('}')[-1] not in VISUAL),
             [tree_contract(c) for c in node
-             if c.get(A+'id') not in {'@+id/searchHistoryClear', '@+id/searchHistoryDelete'}])
+             if c.get(A+'id') not in {'@+id/searchHistoryClear', '@+id/searchHistoryDelete',
+                                      '@+id/repeatPanel', '@+id/repeatTime', '@+id/repeatSetStart',
+                                      '@+id/repeatSetEnd', '@+id/repeatSave', '@+id/repeatToggle',
+                                      '@+id/repeatIntervals'}])
 
 
 def colors(folder):
@@ -135,30 +138,20 @@ class VisualRefreshContracts(unittest.TestCase):
                     self.assertGreaterEqual(contrast(c[fg], c[bg]), 4.5)
 
     def test_protected_files_and_nonvisual_java_unchanged(self):
-        # v1.56 explicitly adds history strings and SearchActivity behavior; all other
-        # original surfaces remain protected by the visual-refresh baseline.
+        # AB repeat intentionally changes LyricsActivity and MusicPlayer; covered by focused tests.
         for path in ['AGENTS.md', 'app/src/main/AndroidManifest.xml', '.github/workflows/build.yml']:
             self.assertEqual(original(path), (ROOT / path).read_bytes(), path)
         for p in (ROOT/'app/src/main/java').rglob('*.java'):
-            if p.name == 'MainActivity.java':
-                # v1.57 explicitly changes navigation; covered by the navigation
-                # harness, existing search-return suite, CI and focused diff review.
+            if p.name in {'LyricsActivity.java', 'MusicPlayer.java', 'RepeatRange.java', 'RepeatRangeStore.java', 'RepeatController.java'}:
                 continue
-            if p.name in {'SearchActivity.java', 'SearchSongHistoryStore.java'}:
-                continue  # Real behavior coverage: SearchSongHistoryActivityTest/StoreTest.
+            if p.name in {'MainActivity.java', 'SearchActivity.java', 'SearchSongHistoryStore.java'}:
+                continue
             before = original(str(p.relative_to(ROOT))).decode()
-            after = p.read_text()
-            if p.name == 'MainActivity.java':
-                before = before.replace('android.R.color.holo_red_dark', 'R.color.network_offline')
-                before = before.replace('android.R.color.holo_green_dark', 'R.color.network_online')
-                # Swipe-delete is a destructive surface, not a network-status label.
-                before = before.replace('backPaint.setColor(ContextCompat.getColor(this, R.color.network_offline))',
-                                        'backPaint.setColor(ContextCompat.getColor(this, R.color.destructive_background))')
-            self.assertEqual(before, after, str(p))
+            self.assertEqual(before, p.read_text(), str(p))
 
     def test_version_only_gradle_change(self):
         p = 'app/build.gradle'
-        expected = original(p).decode().replace('versionCode 153', 'versionCode 160').replace('versionName "1.53"', 'versionName "1.60"')
+        expected = original(p).decode().replace('versionCode 153', 'versionCode 161').replace('versionName "1.53"', 'versionName "1.61"')
         self.assertEqual(expected, (ROOT/p).read_text())
 
     def test_lyrics_no_fixed_blue(self):
