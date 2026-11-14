@@ -14,6 +14,16 @@
     <color name="secondary_variant">#A61E39</color>
     <color name="background">#F2F2F7</color>
     <color name="surface">#FFFFFF</color>
+    <color name="surface_container_low">#F7F7FA</color>
+    <color name="surface_container">#F0F0F5</color>
+    <color name="surface_container_high">#E7E7ED</color>
+    <color name="repeat_sheet_surface">#E6F7F7FA</color>
+    <color name="repeat_sheet_border">#A6FFFFFF</color>
+    <color name="repeat_secondary_action">#E7E7ED</color>
+    <color name="repeat_selected_surface">#FCE8ED</color>
+    <color name="repeat_on_selected">#541524</color>
+    <color name="repeat_destructive">#F9DEDC</color>
+    <color name="repeat_on_destructive">#410E0B</color>
     <color name="error">#BD203C</color>
     <color name="on_primary">#FFFFFF</color>
     <color name="on_secondary">#FFFFFF</color>

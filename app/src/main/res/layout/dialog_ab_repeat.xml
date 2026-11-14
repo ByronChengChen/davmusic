@@ -4,7 +4,8 @@
     android:layout_height="wrap_content"
     android:fillViewport="true"
     android:maxHeight="560dp"
-    android:padding="16dp">
+    android:padding="16dp"
+    android:background="@android:color/transparent">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -26,28 +27,37 @@
             android:orientation="horizontal">
 
             <Button
+                style="@style/Widget.DavMusic.RepeatButton"
                 android:id="@+id/repeatSetStart"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:layout_marginEnd="6dp"
+                android:background="@drawable/button_surface_secondary"
+                android:textColor="@color/text_primary"
                 android:minWidth="0dp"
                 android:text="设为 A" />
 
             <Button
+                style="@style/Widget.DavMusic.RepeatButton"
                 android:id="@+id/repeatSetEnd"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:layout_marginEnd="6dp"
+                android:background="@drawable/button_surface_secondary"
+                android:textColor="@color/text_primary"
                 android:minWidth="0dp"
                 android:text="设为 B" />
 
             <Button
+                style="@style/Widget.DavMusic.RepeatButton"
                 android:id="@+id/repeatSave"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:background="@drawable/button_surface_secondary"
+                android:textColor="@color/text_primary"
                 android:minWidth="0dp"
                 android:text="保存" />
         </LinearLayout>
@@ -56,13 +66,18 @@
             android:id="@+id/repeatIntervals"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical" />
+            android:orientation="vertical"
+            android:paddingTop="8dp"
+            android:paddingBottom="4dp" />
 
         <Button
+                style="@style/Widget.DavMusic.RepeatButton"
             android:id="@+id/repeatToggle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
+            android:background="@drawable/repeat_button_primary"
+            android:textColor="@color/on_primary"
             android:text="开始复读" />
     </LinearLayout>
 </ScrollView>

@@ -31,13 +31,43 @@ public class LyricsRepeatWidgetTest {
     @Test public void repeatGlassBackgroundIsTranslucentAndLayered() {
         android.content.Context context = new ContextThemeWrapper(
                 RuntimeEnvironment.getApplication(), R.style.Theme_DavMusic);
+        android.graphics.drawable.Drawable secondary = context.getDrawable(R.drawable.button_surface_secondary);
+        assertTrue(secondary instanceof android.graphics.drawable.GradientDrawable);
+        android.graphics.drawable.GradientDrawable secondaryShape = (android.graphics.drawable.GradientDrawable) secondary;
+        assertEquals(context.getColor(R.color.repeat_secondary_action), secondaryShape.getColor().getDefaultColor());
         android.graphics.drawable.Drawable background = context.getDrawable(R.drawable.repeat_glass_background);
         assertNotNull(background);
         assertTrue(background instanceof android.graphics.drawable.LayerDrawable);
         android.graphics.drawable.Drawable glassLayer = ((android.graphics.drawable.LayerDrawable) background).getDrawable(0);
         assertTrue(glassLayer instanceof android.graphics.drawable.GradientDrawable);
         android.graphics.drawable.GradientDrawable shape = (android.graphics.drawable.GradientDrawable) glassLayer;
-        assertEquals(0xD9, android.graphics.Color.alpha(shape.getColor().getDefaultColor()));
+        assertEquals(context.getColor(R.color.repeat_sheet_surface), shape.getColor().getDefaultColor());
+    }
+
+    @Test public void repeatSemanticPaletteHasDistinctRolesInLightAndDarkModes() {
+        for (int mode : new int[]{android.content.res.Configuration.UI_MODE_NIGHT_NO,
+                android.content.res.Configuration.UI_MODE_NIGHT_YES}) {
+            android.content.res.Configuration config = new android.content.res.Configuration(
+                    RuntimeEnvironment.getApplication().getResources().getConfiguration());
+            config.uiMode = (config.uiMode & ~android.content.res.Configuration.UI_MODE_NIGHT_MASK) | mode;
+            android.content.Context context = new ContextThemeWrapper(
+                    RuntimeEnvironment.getApplication().createConfigurationContext(config), R.style.Theme_DavMusic);
+            assertContrast(context.getColor(R.color.repeat_on_selected), context.getColor(R.color.repeat_selected_surface));
+            assertContrast(context.getColor(R.color.repeat_on_destructive), context.getColor(R.color.repeat_destructive));
+            assertContrast(context.getColor(R.color.text_primary), context.getColor(R.color.repeat_secondary_action));
+            assertContrast(context.getColor(R.color.on_primary), context.getColor(R.color.primary));
+            View sheet = android.view.LayoutInflater.from(context).inflate(R.layout.dialog_ab_repeat, null, false);
+            Button secondary = sheet.findViewById(R.id.repeatSetStart);
+            assertNull(secondary.getBackgroundTintList());
+            assertEquals(context.getColor(R.color.text_primary), secondary.getCurrentTextColor());
+            android.graphics.drawable.GradientDrawable fill = (android.graphics.drawable.GradientDrawable) secondary.getBackground();
+            assertEquals(context.getColor(R.color.repeat_secondary_action), fill.getColor().getDefaultColor());
+        }
+    }
+
+    private static void assertContrast(int foreground, int background) {
+        assertTrue("Text contrast must be at least 4.5:1",
+                androidx.core.graphics.ColorUtils.calculateContrast(foreground, background) >= 4.5);
     }
 
     @Test public void repeatDialogWindowIsConfiguredForBottomSheet() {
@@ -65,6 +95,9 @@ public class LyricsRepeatWidgetTest {
         assertNotNull(view.findViewById(R.id.repeatToggle));
         assertNotNull(view.findViewById(R.id.repeatIntervals));
         assertEquals("开始复读", ((Button) view.findViewById(R.id.repeatToggle)).getText().toString());
+        assertNotNull(((Button) view.findViewById(R.id.repeatToggle)).getBackground());
+        assertNotNull(((Button) view.findViewById(R.id.repeatSetStart)).getBackground());
+        assertNotNull(((Button) view.findViewById(R.id.repeatSave)).getBackground());
         assertEquals(6f, view.findViewById(R.id.repeatSetStart).getLayoutParams() instanceof android.widget.LinearLayout.LayoutParams
                 ? ((android.widget.LinearLayout.LayoutParams) view.findViewById(R.id.repeatSetStart).getLayoutParams()).rightMargin / context.getResources().getDisplayMetrics().density
                 : -1f, 0.1f);

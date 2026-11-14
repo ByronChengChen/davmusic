@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Scoped to the repeat sheet; never change the global button palette. -->
+    <style name="Widget.DavMusic.RepeatButton" parent="Widget.DavMusic.PlainButton">
+        <item name="backgroundTint">@null</item>
+        <item name="android:backgroundTint">@null</item>
+    </style>
+</resources>

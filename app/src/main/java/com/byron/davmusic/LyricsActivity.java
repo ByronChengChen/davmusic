@@ -206,6 +206,9 @@ public class LyricsActivity extends AppCompatActivity {
                 .setView(content)
                 .create();
         repeatDialog.setOnShowListener(dialog -> {
+            int titleId = getResources().getIdentifier("alertTitle", "id", "android");
+            View title = repeatDialog.findViewById(titleId);
+            if (title instanceof TextView) ((TextView) title).setTextColor(getColor(R.color.text_primary));
             bindRepeatDialogViews();
             renderRepeatRanges();
             updateRepeatDialogStatus();
@@ -228,6 +231,7 @@ public class LyricsActivity extends AppCompatActivity {
         if (repeatDialog == null || !repeatDialog.isShowing()) return;
         repeatIntervalsView = repeatDialog.findViewById(R.id.repeatIntervals);
         repeatTimeView = repeatDialog.findViewById(R.id.repeatTime);
+        if (repeatTimeView != null) repeatTimeView.setTextColor(getColor(R.color.text_primary));
         repeatToggleButton = repeatDialog.findViewById(R.id.repeatToggle);
         if (repeatTimeView == null || repeatToggleButton == null || repeatIntervalsView == null) return;
         View setStart = repeatDialog.findViewById(R.id.repeatSetStart);
@@ -309,16 +313,25 @@ public class LyricsActivity extends AppCompatActivity {
             row.setGravity(android.view.Gravity.CENTER_VERTICAL);
             TextView label = new TextView(this);
             label.setText(formatTime(range.getStartMs()) + " – " + formatTime(range.getEndMs()));
-            label.setTextColor(android.graphics.Color.WHITE);
+            label.setTextColor(getColor(R.color.text_primary));
             label.setPadding(8, 4, 8, 4);
             row.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
             Button select = new Button(this);
-            select.setText(selectedRepeatRange != null && selectedRepeatRange.equals(range) ? "已选择" : "选择");
+            select.setBackgroundTintList(null);
+            androidx.core.view.ViewCompat.setBackgroundTintList(select, null);
+            boolean selected = selectedRepeatRange != null && selectedRepeatRange.equals(range);
+            select.setText(selected ? "已选择" : "选择");
+            select.setBackgroundResource(selected ? R.drawable.button_surface_selected : R.drawable.button_surface_secondary);
+            select.setTextColor(getColor(selected ? R.color.repeat_on_selected : R.color.text_primary));
             select.setOnClickListener(v -> { selectedRepeatRange = repeatRanges.get(index); renderRepeatRanges(); });
             row.addView(select);
             Button delete = new Button(this);
+            delete.setBackgroundTintList(null);
+            androidx.core.view.ViewCompat.setBackgroundTintList(delete, null);
             delete.setText("×");
             delete.setContentDescription("删除复读区间");
+            delete.setBackgroundResource(R.drawable.button_surface_destructive);
+            delete.setTextColor(getColor(R.color.repeat_on_destructive));
             delete.setOnClickListener(v -> {
                 boolean deletingActive = player.getRepeatController().isActiveRange(repeatTrackKey, repeatRanges.get(index));
                 boolean deletingSelected = selectedRepeatRange != null && selectedRepeatRange.equals(repeatRanges.get(index));
