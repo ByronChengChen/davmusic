@@ -47,6 +47,14 @@ Android sans-serif；工具栏 20sp medium、配置标题保留 24sp、普通行
 ## Layout
 所有 layout_width/height、padding、margin、orientation、weight、层级、ID、include、visibility、maxLines、contentDescription 原样保留；主题中现有 minHeight/padding/margin 同样不缩减。不变性测试记录修改前所有非视觉 XML 属性。允许背景、字体属性、颜色、elevation 变化，不改变命中区域。
 
+### 按钮间距（全局硬性规范）
+- 任何情况下，独立按钮之间都必须有清晰可见的留白，不允许横向或纵向紧贴；适用于静态 XML、动态创建控件、列表行、弹窗及全部交互状态。
+- 相邻按钮水平间距至少 8dp；上下按钮行的可见间距至少 8dp。删除等破坏性按钮同样适用，不得与选择按钮连成一块。
+- 使用显式 margin 或容器 spacing；不能依赖圆角、颜色差异、按钮 drawable 内部 inset 或文字 padding 假装存在间距。
+- 小屏、长文案、大字体、选中/未选中、启用/禁用、浅深色均不能取消间距；空间不足应换行或滚动，不得压缩到贴合。
+- 复读区间行：选择/已选择与右侧 × 水平间距 8dp，区间行底部留白 8dp；顶部 A/B/保存间距统一为 8dp。
+- 后续新建或修改按钮组必须检查实际布局间距并添加回归断言。此规范是对历史纯换肤布局冻结约束的明确间距修正例外，不授权其他结构改动。
+
 ## Elevation & Depth
 顶栏去重阴影；播放条保留边界但减弱到 1dp；对话框使用 16dp 圆角，按钮/输入框 12dp。以表面明度取代厚重阴影。播放条只换背景 shape，不增加容器。
 

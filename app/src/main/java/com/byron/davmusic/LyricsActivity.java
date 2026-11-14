@@ -324,7 +324,9 @@ public class LyricsActivity extends AppCompatActivity {
             select.setBackgroundResource(selected ? R.drawable.button_surface_selected : R.drawable.button_surface_secondary);
             select.setTextColor(getColor(selected ? R.color.repeat_on_selected : R.color.text_primary));
             select.setOnClickListener(v -> { selectedRepeatRange = repeatRanges.get(index); renderRepeatRanges(); });
-            row.addView(select);
+            LinearLayout.LayoutParams selectParams = new LinearLayout.LayoutParams(-2, -2);
+            selectParams.setMarginEnd(Math.round(8 * getResources().getDisplayMetrics().density));
+            row.addView(select, selectParams);
             Button delete = new Button(this);
             delete.setBackgroundTintList(null);
             androidx.core.view.ViewCompat.setBackgroundTintList(delete, null);
@@ -346,7 +348,9 @@ public class LyricsActivity extends AppCompatActivity {
                 renderRepeatRanges();
             });
             row.addView(delete);
-            repeatIntervalsView.addView(row);
+            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
+            rowParams.bottomMargin = Math.round(8 * getResources().getDisplayMetrics().density);
+            repeatIntervalsView.addView(row, rowParams);
         }
     }
 

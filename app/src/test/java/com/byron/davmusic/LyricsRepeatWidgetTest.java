@@ -85,6 +85,39 @@ public class LyricsRepeatWidgetTest {
         dialog.dismiss();
     }
 
+    @Test public void dynamicRangeActionsHaveExplicitSpacing() throws Exception {
+        LyricsActivity activity = org.robolectric.Robolectric.buildActivity(LyricsActivity.class).get();
+        java.lang.reflect.Field rangesField = LyricsActivity.class.getDeclaredField("repeatRanges");
+        rangesField.setAccessible(true);
+        java.util.List<RepeatRange> ranges = new java.util.ArrayList<>();
+        ranges.add(RepeatRange.create(1000, 3000, 10000));
+        ranges.add(RepeatRange.create(4000, 6000, 10000));
+        ((java.util.List<RepeatRange>) rangesField.get(activity)).addAll(ranges);
+        android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(
+                new ContextThemeWrapper(activity, R.style.Theme_DavMusic)).create();
+        dialog.show();
+        android.widget.LinearLayout container = new android.widget.LinearLayout(activity);
+        container.setOrientation(android.widget.LinearLayout.VERTICAL);
+        java.lang.reflect.Field dialogField = LyricsActivity.class.getDeclaredField("repeatDialog");
+        dialogField.setAccessible(true);
+        dialogField.set(activity, dialog);
+        java.lang.reflect.Field containerField = LyricsActivity.class.getDeclaredField("repeatIntervalsView");
+        containerField.setAccessible(true);
+        containerField.set(activity, container);
+        java.lang.reflect.Method render = LyricsActivity.class.getDeclaredMethod("renderRepeatRanges");
+        render.setAccessible(true);
+        render.invoke(activity);
+        float density = activity.getResources().getDisplayMetrics().density;
+        assertEquals(2, container.getChildCount());
+        for (int i = 0; i < container.getChildCount(); i++) {
+            android.widget.LinearLayout row = (android.widget.LinearLayout) container.getChildAt(i);
+            assertEquals(8f, ((android.widget.LinearLayout.LayoutParams) row.getChildAt(1).getLayoutParams()).getMarginEnd() / density, 0.1f);
+            assertEquals(8f, ((android.widget.LinearLayout.LayoutParams) row.getLayoutParams()).bottomMargin / density, 0.1f);
+            assertEquals("×", ((Button) row.getChildAt(2)).getText().toString());
+        }
+        dialog.dismiss();
+    }
+
     @Test public void repeatDialogInflatesAllRepeatActions() {
         android.content.Context context = new ContextThemeWrapper(
                 RuntimeEnvironment.getApplication(), R.style.Theme_DavMusic);
@@ -98,10 +131,10 @@ public class LyricsRepeatWidgetTest {
         assertNotNull(((Button) view.findViewById(R.id.repeatToggle)).getBackground());
         assertNotNull(((Button) view.findViewById(R.id.repeatSetStart)).getBackground());
         assertNotNull(((Button) view.findViewById(R.id.repeatSave)).getBackground());
-        assertEquals(6f, view.findViewById(R.id.repeatSetStart).getLayoutParams() instanceof android.widget.LinearLayout.LayoutParams
+        assertEquals(8f, view.findViewById(R.id.repeatSetStart).getLayoutParams() instanceof android.widget.LinearLayout.LayoutParams
                 ? ((android.widget.LinearLayout.LayoutParams) view.findViewById(R.id.repeatSetStart).getLayoutParams()).rightMargin / context.getResources().getDisplayMetrics().density
                 : -1f, 0.1f);
-        assertEquals(6f, ((android.widget.LinearLayout.LayoutParams) view.findViewById(R.id.repeatSetEnd).getLayoutParams()).rightMargin
+        assertEquals(8f, ((android.widget.LinearLayout.LayoutParams) view.findViewById(R.id.repeatSetEnd).getLayoutParams()).rightMargin
                 / context.getResources().getDisplayMetrics().density, 0.1f);
     }
 }
