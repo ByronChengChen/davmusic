@@ -199,6 +199,7 @@ public class LyricsActivity extends AppCompatActivity {
     private void showRepeatDialog() {
         if (repeatDialog != null && repeatDialog.isShowing()) return;
         View content = getLayoutInflater().inflate(R.layout.dialog_ab_repeat, null, false);
+        content.setBackgroundResource(R.drawable.repeat_glass_background);
         repeatDialog = new android.app.AlertDialog.Builder(
                 new android.view.ContextThemeWrapper(this, R.style.Theme_DavMusic))
                 .setTitle("复读设置")

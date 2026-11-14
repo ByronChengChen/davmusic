@@ -28,6 +28,18 @@ public class LyricsRepeatWidgetTest {
         assertEquals("复读", menu.getMenu().getItem(0).getTitle().toString());
     }
 
+    @Test public void repeatGlassBackgroundIsTranslucentAndLayered() {
+        android.content.Context context = new ContextThemeWrapper(
+                RuntimeEnvironment.getApplication(), R.style.Theme_DavMusic);
+        android.graphics.drawable.Drawable background = context.getDrawable(R.drawable.repeat_glass_background);
+        assertNotNull(background);
+        assertTrue(background instanceof android.graphics.drawable.LayerDrawable);
+        android.graphics.drawable.Drawable glassLayer = ((android.graphics.drawable.LayerDrawable) background).getDrawable(0);
+        assertTrue(glassLayer instanceof android.graphics.drawable.GradientDrawable);
+        android.graphics.drawable.GradientDrawable shape = (android.graphics.drawable.GradientDrawable) glassLayer;
+        assertEquals(0xD9, android.graphics.Color.alpha(shape.getColor().getDefaultColor()));
+    }
+
     @Test public void repeatDialogWindowIsConfiguredForBottomSheet() {
         android.content.Context context = new ContextThemeWrapper(
                 RuntimeEnvironment.getApplication(), R.style.Theme_DavMusic);
