@@ -1,5 +1,7 @@
 # Requirements — davmusic
 
+> v1.68 已验收增补：歌词页 AB 复读功能（底部弹窗、按歌曲保存/选择/删除区间、开始/停止、Material Design 3 语义浅深色配色、按钮与区间行至少 8dp 间距）。详细需求见 [AB repeat](../ab-repeat/requirements.md)。已验收 APK 提交 `13f2b6a`，CI run [43554497840](https://github.com/ByronChengChen/davmusic/actions/runs/43554497840)：158 项测试、0 失败；用户确认复读功能真机测试无问题。
+
 > Android WebDAV 音乐播放器
 >
 > 本文档遵循 Kiro Spec 规范，使用 **EARS**（Easy Approach to Requirements Syntax）记法书写。
