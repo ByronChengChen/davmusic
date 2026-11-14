@@ -28,6 +28,21 @@ public class LyricsRepeatWidgetTest {
         assertEquals("复读", menu.getMenu().getItem(0).getTitle().toString());
     }
 
+    @Test public void repeatDialogWindowIsConfiguredForBottomSheet() {
+        android.content.Context context = new ContextThemeWrapper(
+                RuntimeEnvironment.getApplication(), R.style.Theme_DavMusic);
+        android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(context).create();
+        dialog.show();
+        dialog.getWindow().setGravity(android.view.Gravity.BOTTOM);
+        dialog.getWindow().setLayout(android.view.WindowManager.LayoutParams.MATCH_PARENT,
+                android.view.WindowManager.LayoutParams.WRAP_CONTENT);
+        assertTrue((dialog.getWindow().getAttributes().gravity & android.view.Gravity.BOTTOM)
+                == android.view.Gravity.BOTTOM);
+        assertEquals(android.view.WindowManager.LayoutParams.MATCH_PARENT,
+                dialog.getWindow().getAttributes().width);
+        dialog.dismiss();
+    }
+
     @Test public void repeatDialogInflatesAllRepeatActions() {
         android.content.Context context = new ContextThemeWrapper(
                 RuntimeEnvironment.getApplication(), R.style.Theme_DavMusic);

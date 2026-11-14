@@ -215,6 +215,12 @@ public class LyricsActivity extends AppCompatActivity {
             repeatIntervalsView = null;
         });
         repeatDialog.show();
+        repeatDialog.getWindow().setGravity(android.view.Gravity.BOTTOM);
+        repeatDialog.getWindow().setDimAmount(0.18f);
+        repeatDialog.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+        repeatDialog.getWindow().setLayout(android.view.WindowManager.LayoutParams.MATCH_PARENT,
+                android.view.WindowManager.LayoutParams.WRAP_CONTENT);
+        repeatDialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
     }
 
     private void bindRepeatDialogViews() {
