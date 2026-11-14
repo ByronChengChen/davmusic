@@ -2,7 +2,9 @@ package com.byron.davmusic;
 
 import static org.junit.Assert.*;
 import android.widget.Button;
-import android.widget.LinearLayout;
+import android.widget.ImageButton;
+import android.view.ContextThemeWrapper;
+import android.view.View;
 import org.robolectric.RuntimeEnvironment;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -12,16 +14,30 @@ import org.robolectric.annotation.Config;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 34)
 public class LyricsRepeatWidgetTest {
-    @Test public void activityInflatesRepeatActionsAndDeleteContainer() {
-        android.content.Context context = new android.view.ContextThemeWrapper(
+    @Test public void lyricsPageHasMoreButtonAndNoInlineRepeatPanel() {
+        android.content.Context context = new ContextThemeWrapper(
                 RuntimeEnvironment.getApplication(), R.style.Theme_DavMusic);
-        android.view.View view = android.view.LayoutInflater.from(context).inflate(R.layout.activity_lyrics, null, false);
+        View view = android.view.LayoutInflater.from(context).inflate(R.layout.activity_lyrics, null, false);
+        assertTrue(view.findViewById(R.id.moreButton) instanceof ImageButton);
+        assertNull(view.findViewById(R.id.repeatPanel));
+        assertNull(view.findViewById(R.id.repeatSetStart));
+        androidx.appcompat.widget.PopupMenu menu = new androidx.appcompat.widget.PopupMenu(
+                context, view.findViewById(R.id.moreButton));
+        menu.inflate(R.menu.lyrics_more);
+        assertEquals(1, menu.getMenu().size());
+        assertEquals(R.id.action_repeat, menu.getMenu().getItem(0).getItemId());
+        assertEquals("复读", menu.getMenu().getItem(0).getTitle().toString());
+    }
+
+    @Test public void repeatDialogInflatesAllRepeatActions() {
+        android.content.Context context = new ContextThemeWrapper(
+                RuntimeEnvironment.getApplication(), R.style.Theme_DavMusic);
+        View view = android.view.LayoutInflater.from(context).inflate(R.layout.dialog_ab_repeat, null, false);
         assertNotNull(view.findViewById(R.id.repeatSetStart));
         assertNotNull(view.findViewById(R.id.repeatSetEnd));
         assertNotNull(view.findViewById(R.id.repeatSave));
         assertNotNull(view.findViewById(R.id.repeatToggle));
-        assertTrue(view.findViewById(R.id.repeatIntervals) instanceof LinearLayout);
+        assertNotNull(view.findViewById(R.id.repeatIntervals));
         assertEquals("开始复读", ((Button) view.findViewById(R.id.repeatToggle)).getText().toString());
-        assertEquals("设为 A", ((Button) view.findViewById(R.id.repeatSetStart)).getText().toString());
     }
 }

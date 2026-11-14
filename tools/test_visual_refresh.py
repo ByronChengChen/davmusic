@@ -105,6 +105,28 @@ class VisualRefreshContracts(unittest.TestCase):
                             self.assertEqual('end', e.get(A+'ellipsize'))
                         self.assertEqual('searchSongText', after[0].get(A+'id').split('/')[-1])
                         continue
+                    if p.name == 'activity_lyrics.xml':
+                        # Approved v1.62 change: add the overflow entry while preserving existing lyrics controls.
+                        before = ET.fromstring(original(str(p.relative_to(ROOT))))
+                        after = ET.parse(p).getroot()
+                        old_ids = [e.get(A+'id') for e in before.iter() if e.get(A+'id')]
+                        new_ids = [e.get(A+'id') for e in after.iter() if e.get(A+'id')]
+                        self.assertIn('@+id/moreButton', new_ids)
+                        self.assertIn('@+id/backButton', new_ids)
+                        self.assertIn('@+id/lyricsList', new_ids)
+                        self.assertIn('@+id/playerBar', new_ids)
+                        self.assertNotIn('@+id/repeatPanel', new_ids)
+                        self.assertNotIn('@+id/repeatSetStart', new_ids)
+                        continue
+                    if p.name == 'dialog_ab_repeat.xml':
+                        self.assertEqual({'@+id/repeatTime', '@+id/repeatSetStart', '@+id/repeatSetEnd',
+                                          '@+id/repeatSave', '@+id/repeatToggle', '@+id/repeatIntervals'},
+                                         {e.get(A+'id') for e in ET.parse(p).getroot().iter() if e.get(A+'id')})
+                        continue
+                    if p.name == 'lyrics_more.xml':
+                        menu_ids = {e.get(A+'id') for e in ET.parse(p).getroot().iter() if e.get(A+'id')}
+                        self.assertEqual({'@+id/action_repeat'}, menu_ids)
+                        continue
                     self.assertEqual(tree_contract(ET.fromstring(original(str(p.relative_to(ROOT))))),
                                      tree_contract(ET.parse(p).getroot()))
 
@@ -151,7 +173,7 @@ class VisualRefreshContracts(unittest.TestCase):
 
     def test_version_only_gradle_change(self):
         p = 'app/build.gradle'
-        expected = original(p).decode().replace('versionCode 153', 'versionCode 161').replace('versionName "1.53"', 'versionName "1.61"')
+        expected = original(p).decode().replace('versionCode 153', 'versionCode 162').replace('versionName "1.53"', 'versionName "1.62"')
         self.assertEqual(expected, (ROOT/p).read_text())
 
     def test_lyrics_no_fixed_blue(self):
