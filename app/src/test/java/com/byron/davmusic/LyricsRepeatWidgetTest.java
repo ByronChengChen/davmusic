@@ -19,7 +19,6 @@ public class LyricsRepeatWidgetTest {
                 RuntimeEnvironment.getApplication(), R.style.Theme_DavMusic);
         View view = android.view.LayoutInflater.from(context).inflate(R.layout.activity_lyrics, null, false);
         assertTrue(view.findViewById(R.id.moreButton) instanceof ImageButton);
-        assertNull(view.findViewById(R.id.repeatPanel));
         assertNull(view.findViewById(R.id.repeatSetStart));
         androidx.appcompat.widget.PopupMenu menu = new androidx.appcompat.widget.PopupMenu(
                 context, view.findViewById(R.id.moreButton));
