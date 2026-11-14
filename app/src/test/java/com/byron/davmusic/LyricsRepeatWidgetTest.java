@@ -38,5 +38,10 @@ public class LyricsRepeatWidgetTest {
         assertNotNull(view.findViewById(R.id.repeatToggle));
         assertNotNull(view.findViewById(R.id.repeatIntervals));
         assertEquals("开始复读", ((Button) view.findViewById(R.id.repeatToggle)).getText().toString());
+        assertEquals(6f, view.findViewById(R.id.repeatSetStart).getLayoutParams() instanceof android.widget.LinearLayout.LayoutParams
+                ? ((android.widget.LinearLayout.LayoutParams) view.findViewById(R.id.repeatSetStart).getLayoutParams()).rightMargin / context.getResources().getDisplayMetrics().density
+                : -1f, 0.1f);
+        assertEquals(6f, ((android.widget.LinearLayout.LayoutParams) view.findViewById(R.id.repeatSetEnd).getLayoutParams()).rightMargin
+                / context.getResources().getDisplayMetrics().density, 0.1f);
     }
 }
