@@ -42,7 +42,7 @@ public class CachedTrackDownloaderTest {
                 while (!done[0] && System.nanoTime()<limit) { Shadows.shadowOf(Looper.getMainLooper()).idle(); Thread.sleep(10); }
                 assertTrue("callback delivered",done[0]); assertEquals(success,ok[0]);
                 assertEquals(success,LocalCacheManager.getInstance(context).isDownloaded(f.getCacheKey()));
-                if (success) assertEquals(body,Files.readString(dest.toPath())); else assertFalse(dest.exists());
+                if (success) assertEquals(body,new String(Files.readAllBytes(dest.toPath()),StandardCharsets.UTF_8)); else assertFalse(dest.exists());
                 assertTrue(request.get(2,TimeUnit.SECONDS).contains("a%2Bb.mp3"));
                 assertEquals(0,dest.getParentFile().listFiles((dir,name)->name.endsWith(".part")).length);
             } finally { worker.shutdownNow(); LocalCacheManager.getInstance(context).removeDownloadedFile(f.getCacheKey()); ServerStore.remove(context,id); }
