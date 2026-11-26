@@ -11,6 +11,14 @@ import org.robolectric.annotation.Config;
 import static org.junit.Assert.*;
 @RunWith(RobolectricTestRunner.class) @Config(sdk=34)
 public class DirectoryDeletionUiTest {
+    private ServerProfile fixtureOwner;
+    @Before public void configuredServerBeforeActivityCreate() {
+        fixtureOwner=ServerStore.add(RuntimeEnvironment.getApplication(),
+                new ServerProfile("delete-fixture","test","http://127.0.0.1:9/","u","p"));
+    }
+    @After public void removeFixtureServer() {
+        ServerStore.remove(RuntimeEnvironment.getApplication(),fixtureOwner.getId());
+    }
     private void field(Object a,String name,Object value) throws Exception {
         Field f=a.getClass().getDeclaredField(name);f.setAccessible(true);f.set(a,value);
     }
