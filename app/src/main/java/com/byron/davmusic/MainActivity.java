@@ -1067,7 +1067,10 @@ public class MainActivity extends AppCompatActivity implements
                     file.setDownloadState(WebDAVFile.DownloadState.DOWNLOADED);
                     file.setLocalPath(cacheManager.getLocalFile(file.getCacheKey()).getAbsolutePath());
                 } else {
-                    file.setDownloadState(WebDAVFile.DownloadState.NOT_DOWNLOADED);
+                    boolean active = downloadTask != null && downloadTask.current != null
+                            && downloadTask.current.getCacheKey().equals(file.getCacheKey());
+                    file.setDownloadState(active ? WebDAVFile.DownloadState.DOWNLOADING : WebDAVFile.DownloadState.NOT_DOWNLOADED);
+                    file.setLocalPath(null);
                 }
             }
         }
@@ -1297,74 +1300,62 @@ public class MainActivity extends AppCompatActivity implements
         }
     }
     
+    private DirectoryDownloadTask downloadTask;
+    private DownloadTaskDialog downloadDialog;
+
     private void downloadFile(WebDAVFile file) {
-        if (!NetworkUtils.isNetworkConnected(this)) {
-            toast("网络不可用，无法下载", Toast.LENGTH_SHORT);
+        startDownloads(java.util.Collections.singletonList(file));
+    }
+
+    private void downloadCurrentDirectory() {
+        if (downloadTask != null && !downloadTask.finished) {
+            showDownloadTask();
             return;
         }
-        
-        // 更新下载状态
-        file.setDownloadState(WebDAVFile.DownloadState.DOWNLOADING);
-        fileListAdapter.updateFile(file);
-        
-        // 获取本地存储路径。
-        // 【多服务器】用 getCacheKey()（含服务器 id）命名，两台服务器
-        // 存在同名路径时不会互相覆盖本地文件。
-        File destFile = cacheManager.getDownloadDestination(file.getCacheKey());
-
-        showLoading("正在下载: " + file.getDisplayName());
-
-        // 【多服务器】下载请求发往该条目所属的服务器
-        final WebDAVClient dlClient = clientFor(findServerById(file.getServerId()));
-
-        executorService.execute(() -> {
-            dlClient.download(file, destFile, new WebDAVClient.ProgressCallback() {
-                @Override
-                public void onProgress(int progress) {
-                    // 可以在这里更新进度条
-                    Log.d(TAG, "下���进度: " + progress + "%");
-                }
-                
-                @Override
-                public void onSuccess(Object result) {
-                    mainHandler.post(() -> {
-                        dismissLoading();
-                        
-                        // 标记文件已下载
-                        cacheManager.markFileDownloaded(file.getCacheKey(), destFile);
-                        // 同时写入离线索引：离线模式需要按目录列举已下载歌曲，
-                        // 仅靠 downloadMap 无法还原目录结构与显示名
-                        cacheManager.indexOfflineFile(file.getHref(),
-                                file.getDisplayName(), destFile.length());
-                        file.setDownloadState(WebDAVFile.DownloadState.DOWNLOADED);
-                        file.setLocalPath(destFile.getAbsolutePath());
-                        fileListAdapter.updateFile(file);
-                        
-                        toast("下载完成: " + file.getDisplayName(), Toast.LENGTH_SHORT);
-                    });
-                }
-                
-                @Override
-                public void onError(Exception e) {
-                    mainHandler.post(() -> {
-                        dismissLoading();
-                        
-                        file.setDownloadState(WebDAVFile.DownloadState.NOT_DOWNLOADED);
-                        fileListAdapter.updateFile(file);
-                        
-                        toast("下载失败: " + e.getMessage(), Toast.LENGTH_LONG);
-                    });
-                }
-            });
-        });
+        if (currentServer == null) { toast("请先进入服务器目录"); return; }
+        startDownloads(new ArrayList<>(fileListAdapter.getFiles()));
     }
+
+    private void startDownloads(List<WebDAVFile> files) {
+        if (downloadTask != null && !downloadTask.finished) {
+            showDownloadTask();
+            return;
+        }
+        if (!NetworkUtils.isNetworkConnected(this)) { toast("网络不可用，无法下载"); return; }
+        CachedTrackDownloader backend = new CachedTrackDownloader(getApplicationContext());
+        downloadTask = new DirectoryDownloadTask(files, backend);
+        backend.progress = downloadTask::progress;
+        downloadTask.listener = new Runnable() {
+            int previousDone = -1;
+            String previousCurrent;
+            public void run() {
+                if (downloadDialog != null) downloadDialog.render();
+                int done = downloadTask.succeeded + downloadTask.skipped + downloadTask.failed;
+                String current = downloadTask.current == null ? null : downloadTask.current.getCacheKey();
+                if (previousDone == done && java.util.Objects.equals(previousCurrent, current)) return;
+                previousDone = done; previousCurrent = current;
+                // Never inject the old directory's snapshot or touch playback; no per-percent row animation.
+                updateFileDownloadStates(fileListAdapter.getFiles());
+                fileListAdapter.notifyDataSetChanged();
+            }
+        };
+        showDownloadTask();
+        downloadTask.start();
+    }
+
+    private void showDownloadTask() {
+        if (downloadDialog != null) downloadDialog.dialog.dismiss();
+        downloadDialog = new DownloadTaskDialog(this, downloadTask);
+        downloadDialog.show();
+    }
+
     
     private void deleteLocalFile(WebDAVFile file) {
         new AlertDialog.Builder(this)
                 .setTitle("删除本地文件")
                 .setMessage("确定要删除本地文件吗？")
                 .setPositiveButton("删除", (dialog, which) -> {
-                    cacheManager.removeDownloadedFile(file.getHref());
+                    cacheManager.removeDownloadedFile(file.getCacheKey());
                     file.setDownloadState(WebDAVFile.DownloadState.NOT_DOWNLOADED);
                     file.setLocalPath(null);
                     fileListAdapter.updateFile(file);
@@ -2284,6 +2275,8 @@ public class MainActivity extends AppCompatActivity implements
             newFolder.setVisible(inServer);
             menuInServerState = inServer;
         }
+        MenuItem download = menu.findItem(R.id.menu_download_directory);
+        if (download != null) download.setVisible(currentServer != null || (downloadTask != null && !downloadTask.finished));
         MenuItem sort = menu.findItem(R.id.menu_sort);
         if (sort != null) {
             // 根目录列的是服务器本身，没有文件时间可排
@@ -2300,6 +2293,9 @@ public class MainActivity extends AppCompatActivity implements
             searchReturnState = recyclerView.getLayoutManager().onSaveInstanceState();
             returningFromSearch = true;
             startActivity(new Intent(this, SearchActivity.class));
+            return true;
+        } else if (id == R.id.menu_download_directory) {
+            downloadCurrentDirectory();
             return true;
         } else if (id == R.id.menu_new_folder) {
             // 新建文件夹：在当前服务器的当前目录下发 MKCOL（直接落到服务器上）
@@ -2460,6 +2456,11 @@ public class MainActivity extends AppCompatActivity implements
     protected void onDestroy() {
         super.onDestroy();
         if (rlog != null) rlog.i(TAG, "<<< onDestroy");
+        if (downloadTask != null) {
+            downloadTask.listener = null;
+            downloadTask.cancelRemaining();
+        }
+        if (downloadDialog != null) downloadDialog.dialog.dismiss();
 
 
         if (executorService != null && !executorService.isShutdown()) {

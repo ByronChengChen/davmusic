@@ -280,7 +280,8 @@ public class WebDAVClient {
                 .header("Authorization", getBasicAuthHeader())
                 .build();
 
-        client.newCall(request).enqueue(new Callback() {
+        // No automatic connection retries for user-initiated downloads; share existing pools.
+        client.newBuilder().retryOnConnectionFailure(false).build().newCall(request).enqueue(new Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
                 callback.onError(e);
@@ -291,9 +292,8 @@ public class WebDAVClient {
                 try {
                     if (response.isSuccessful()) {
                         long contentLength = response.body().contentLength();
-                        InputStream inputStream = response.body().byteStream();
-                        FileOutputStream outputStream = new FileOutputStream(destFile);
-                        
+                        try (InputStream inputStream = response.body().byteStream();
+                             FileOutputStream outputStream = new FileOutputStream(destFile)) {
                         byte[] buffer = new byte[8192];
                         long downloaded = 0;
                         int bytesRead;
@@ -308,8 +308,10 @@ public class WebDAVClient {
                             }
                         }
                         
-                        outputStream.close();
-                        inputStream.close();
+                        if (contentLength >= 0 && downloaded != contentLength) {
+                            throw new IOException("Incomplete download");
+                        }
+                        }
                         callback.onSuccess(destFile);
                     } else {
                         callback.onError(new Exception("Download failed: HTTP " + response.code()));

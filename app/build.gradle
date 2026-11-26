@@ -10,8 +10,8 @@ android {
         applicationId "com.byron.davmusic"
         minSdk 26
         targetSdk 34
-        versionCode 168
-        versionName "1.68"
+        versionCode 169
+        versionName "1.69"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 

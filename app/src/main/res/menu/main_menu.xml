@@ -64,4 +64,5 @@
         android:title="@string/menu_about"
         app:showAsAction="never" />
 
+    <item android:id="@+id/menu_download_directory" android:title="下载当前目录歌曲" app:showAsAction="never" />
 </menu>
