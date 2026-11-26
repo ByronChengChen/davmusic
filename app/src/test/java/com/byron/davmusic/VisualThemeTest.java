@@ -78,7 +78,7 @@ public class VisualThemeTest {
         int[] expected = {R.id.menu_search, R.id.menu_new_folder, R.id.menu_refresh,
                 R.id.menu_manage_servers, R.id.menu_sort, R.id.menu_locate_current,
                 R.id.menu_settings, R.id.menu_clear_cache, R.id.menu_log_endpoint,
-                R.id.menu_log_token, R.id.menu_upload_log, R.id.menu_about};
+                R.id.menu_log_token, R.id.menu_upload_log, R.id.menu_about, R.id.menu_download_directory};
         assertEquals(expected.length, menu.size());
         for (int i = 0; i < expected.length; i++) assertEquals(expected[i], menu.getItem(i).getItemId());
     }
