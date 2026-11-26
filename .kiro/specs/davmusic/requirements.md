@@ -732,6 +732,10 @@
 - 完整需求/设计与验证边界见 `../directory-return-and-history-layout/requirements.md` 与 `design.md`。
 - 远端重命名/移动仍为范围外（R18 不含重命名）。
 
+## 当前目录本地下载删除（v1.70）
+
+新增与目录下载相邻的本地删除，严格 serverId / 直接父目录隔离，下载冲突整批拒绝，播放/预加载保护跳过；不调用远端 DELETE。详见 `../current-directory-delete/requirements.md`、`design.md` 与 `verification.md`。真机验收前不打 tag。
+
 ## 4. 非功能需求
 
 **N1 网络超时**

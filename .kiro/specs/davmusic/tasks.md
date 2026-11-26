@@ -807,6 +807,10 @@ requirements 曾把「播放模式」列在范围外。这次是补做，不是�
 
 **验证命令**：`python3 scripts/test_music_search_jvm.py`、`python3 scripts/check_music_search.py`、`git diff --check`。纯 JVM stub 不代表 Android 框架测试；静态契约检查不代表 UI 运行。
 
+## 当前目录本地下载删除（v1.70）
+
+新增与目录下载相邻的本地删除，严格 serverId / 直接父目录隔离，下载冲突整批拒绝，播放/预加载保护跳过；不调用远端 DELETE。详见 `../current-directory-delete/requirements.md`、`design.md` 与 `verification.md`。真机验收前不打 tag。
+
 ## 依赖关系
 
 ```

@@ -124,9 +124,13 @@ class VisualRefreshContracts(unittest.TestCase):
                                          {e.get(A+'id') for e in ET.parse(p).getroot().iter() if e.get(A+'id')})
                         continue
                     if p.name == 'main_menu.xml':
-                        # v1.69: one approved overflow entry; all original entries unchanged.
+                        # v1.70: paired local-only delete; all original entries unchanged.
                         after = ET.parse(p).getroot()
                         entry = next(e for e in after if e.get(A+'id') == '@+id/menu_download_directory')
+                        deletion = next(e for e in after if e.get(A+'id') == '@+id/menu_delete_directory_downloads')
+                        self.assertEqual(list(after).index(entry)+1, list(after).index(deletion))
+                        self.assertEqual('删除当前目录已下载歌曲（仅本地）', deletion.get(A+'title'))
+                        after.remove(deletion)
                         after.remove(entry)
                         self.assertEqual(tree_contract(ET.fromstring(original(str(p.relative_to(ROOT))))), tree_contract(after))
                         continue
@@ -175,6 +179,7 @@ class VisualRefreshContracts(unittest.TestCase):
                 continue
             if p.name in {'MainActivity.java', 'SearchActivity.java', 'SearchSongHistoryStore.java',
                           'DirectoryDownloadTask.java', 'CachedTrackDownloader.java', 'DownloadTaskDialog.java',
+                          'DirectoryDeletion.java', 'LocalCacheManager.java',  # v1.70 local deletion + persistence tests.
                           'WebDAVClient.java'}:
                 continue
             before = original(str(p.relative_to(ROOT))).decode()
@@ -182,7 +187,7 @@ class VisualRefreshContracts(unittest.TestCase):
 
     def test_version_only_gradle_change(self):
         p = 'app/build.gradle'
-        expected = original(p).decode().replace('versionCode 153', 'versionCode 169').replace('versionName "1.53"', 'versionName "1.69"')
+        expected = original(p).decode().replace('versionCode 153', 'versionCode 170').replace('versionName "1.53"', 'versionName "1.70"')
         self.assertEqual(expected, (ROOT/p).read_text())
 
     def test_lyrics_no_fixed_blue(self):

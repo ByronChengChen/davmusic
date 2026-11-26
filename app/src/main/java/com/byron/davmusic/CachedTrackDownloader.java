@@ -9,6 +9,17 @@ import java.util.function.IntConsumer;
 /** Application-owned transfer: no Activity capture, and no fallback to a different server. */
 final class CachedTrackDownloader implements DirectoryDownloadTask.Backend {
     private static final java.util.Set<String> activeKeys = new java.util.HashSet<>();
+    static boolean hasActiveDownloads() {
+        synchronized (activeKeys) { return !activeKeys.isEmpty(); }
+    }
+    // Main-thread callers only; retain the same transfer fence for the complete local batch.
+    static DirectoryDeletion.Result deleteIfIdle(java.util.List<String> keys,
+            java.util.Set<String> protectedKeys, LocalCacheManager cache) {
+        synchronized (activeKeys) {
+            if (!activeKeys.isEmpty()) return null;
+            return DirectoryDeletion.run(keys, protectedKeys, cache::deleteDownloadedCopy);
+        }
+    }
     private final Context context;
     private final LocalCacheManager cache;
     private final Handler main=new Handler(Looper.getMainLooper());

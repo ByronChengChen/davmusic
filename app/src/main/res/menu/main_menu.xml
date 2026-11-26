@@ -65,4 +65,5 @@
         app:showAsAction="never" />
 
     <item android:id="@+id/menu_download_directory" android:title="下载当前目录歌曲" app:showAsAction="never" />
+    <item android:id="@+id/menu_delete_directory_downloads" android:title="删除当前目录已下载歌曲（仅本地）" app:showAsAction="never" />
 </menu>

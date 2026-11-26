@@ -1366,6 +1366,54 @@ public class MainActivity extends AppCompatActivity implements
                 .show();
     }
     
+    private boolean directoryDeletionBlocked() {
+        return (downloadTask != null && !downloadTask.finished) || CachedTrackDownloader.hasActiveDownloads();
+    }
+
+    private void deleteCurrentDirectoryDownloads() {
+        if (currentServer == null) { toast("请先进入服务器目录"); return; }
+        if (directoryDeletionBlocked()) { toast("仍有下载任务，请等待当前下载完成后再删除"); return; }
+        final String directory = currentPath;
+        final List<String> keys = cacheManager.downloadedKeysInDirectory(currentServer.getId(), directory);
+        if (keys.isEmpty()) { toast("当前目录没有已下载歌曲"); return; }
+        showLocalDeletionDialog("删除当前目录已下载歌曲（仅本地）",
+                "目录：" + directory + "\n共 " + keys.size() + " 首本地记录。仅删除本层，不含子目录；不会删除远端文件。"
+                        + "\n播放中、暂停中及预加载歌曲将跳过；缺失文件仅清理本地记录。", "删除本地下载", () -> {
+                    if (directoryDeletionBlocked()) { toast("仍有下载任务，本次未删除任何歌曲"); return; }
+                    DirectoryDeletion.Result result = CachedTrackDownloader.deleteIfIdle(keys,
+                            musicPlayer.localDeletionProtectedKeys(), cacheManager);
+                    if (result == null) { toast("仍有下载任务，本次未删除任何歌曲"); return; }
+                    updateFileDownloadStates(fileListAdapter.getFiles());
+                    fileListAdapter.notifyDataSetChanged();
+                    showLocalDeletionDialog("本地下载清理结果", result.summary(), "知道了", null, false);
+                }, true);
+    }
+
+    private void showLocalDeletionDialog(String title, String message, String action, Runnable confirmed, boolean cancellable) {
+        android.widget.LinearLayout content = new android.widget.LinearLayout(this);
+        content.setOrientation(android.widget.LinearLayout.VERTICAL);
+        int gap = Math.round(8 * getResources().getDisplayMetrics().density);
+        content.setPadding(gap * 3, gap * 2, gap * 3, gap * 2);
+        android.widget.TextView text = new android.widget.TextView(this);
+        text.setText(message); content.addView(text);
+        android.widget.LinearLayout buttons = new android.widget.LinearLayout(this);
+        android.widget.LinearLayout.LayoutParams row = new android.widget.LinearLayout.LayoutParams(-1, -2);
+        row.topMargin = gap; content.addView(buttons, row);
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle(title).setView(content).create();
+        if (cancellable) {
+            android.widget.Button cancel = new android.widget.Button(this);
+            cancel.setId(android.R.id.button2); cancel.setText("取消");
+            android.widget.LinearLayout.LayoutParams lp = new android.widget.LinearLayout.LayoutParams(0, -2, 1);
+            lp.setMarginEnd(gap); buttons.addView(cancel, lp);
+            cancel.setOnClickListener(v -> dialog.dismiss());
+        }
+        android.widget.Button accept = new android.widget.Button(this);
+        accept.setId(android.R.id.button1); accept.setText(action);
+        buttons.addView(accept, new android.widget.LinearLayout.LayoutParams(0, -2, 1));
+        accept.setOnClickListener(v -> { dialog.dismiss(); if (confirmed != null) confirmed.run(); });
+        dialog.show();
+    }
+
     // ---- 左滑删除（远端） ----
 
     /**
@@ -2277,6 +2325,8 @@ public class MainActivity extends AppCompatActivity implements
         }
         MenuItem download = menu.findItem(R.id.menu_download_directory);
         if (download != null) download.setVisible(currentServer != null || (downloadTask != null && !downloadTask.finished));
+        MenuItem deleteDownloads = menu.findItem(R.id.menu_delete_directory_downloads);
+        if (deleteDownloads != null) deleteDownloads.setVisible(currentServer != null);
         MenuItem sort = menu.findItem(R.id.menu_sort);
         if (sort != null) {
             // 根目录列的是服务器本身，没有文件时间可排
@@ -2296,6 +2346,9 @@ public class MainActivity extends AppCompatActivity implements
             return true;
         } else if (id == R.id.menu_download_directory) {
             downloadCurrentDirectory();
+            return true;
+        } else if (id == R.id.menu_delete_directory_downloads) {
+            deleteCurrentDirectoryDownloads();
             return true;
         } else if (id == R.id.menu_new_folder) {
             // 新建文件夹：在当前服务器的当前目录下发 MKCOL（直接落到服务器上）

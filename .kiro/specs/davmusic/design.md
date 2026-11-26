@@ -1003,6 +1003,10 @@ public interface OnPlaybackListener {
 | **前台服务保活时长** | 依赖厂商 ROM 后台策略，真机长时验证 |
 | 性能测试 | 数据量小，暂不需要 |
 
+## 当前目录本地下载删除（v1.70）
+
+新增与目录下载相邻的本地删除，严格 serverId / 直接父目录隔离，下载冲突整批拒绝，播放/预加载保护跳过；不调用远端 DELETE。详见 `../current-directory-delete/requirements.md`、`design.md` 与 `verification.md`。真机验收前不打 tag。
+
 ### 8.4 测试依赖（v1.43 已落地）
 
 ```gradle

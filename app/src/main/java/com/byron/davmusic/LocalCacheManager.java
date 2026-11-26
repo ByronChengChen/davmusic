@@ -284,6 +284,38 @@ public class LocalCacheManager {
         return n;
     }
 
+    public synchronized List<String> downloadedKeysInDirectory(String serverId, String directory) {
+        return DirectoryDeletion.select(downloadMap.keySet(), serverId, directory);
+    }
+
+    /** Delete bytes first; failed/unexpected targets retain both persistent records. */
+    synchronized DirectoryDeletion.Outcome deleteDownloadedCopy(String key) {
+        String path = downloadMap.get(key);
+        boolean existed = false;
+        if (path != null) {
+            File target = new File(path);
+            try {
+                File expected = getDownloadDestination(key);
+                if (!target.getCanonicalFile().equals(expected.getAbsoluteFile())
+                        || !expected.getCanonicalFile().getParentFile().equals(getDownloadDirectory().getCanonicalFile())) {
+                    return DirectoryDeletion.Outcome.FAILED;
+                }
+                // Refuse aliases to any other entry, even if the metadata was corrupted.
+                for (Map.Entry<String,String> entry : downloadMap.entrySet()) {
+                    if (!entry.getKey().equals(key) && new File(entry.getValue()).getCanonicalFile().equals(target.getCanonicalFile()))
+                        return DirectoryDeletion.Outcome.FAILED;
+                }
+                existed = target.exists();
+                if (existed && (!target.isFile() || !target.delete())) return DirectoryDeletion.Outcome.FAILED;
+            } catch (Exception e) { return DirectoryDeletion.Outcome.FAILED; }
+        }
+        downloadMap.remove(key);
+        removeOfflineIndex(key);
+        saveDownloadMap();
+        downloadsChanged();
+        return existed ? DirectoryDeletion.Outcome.DELETED : DirectoryDeletion.Outcome.MISSING;
+    }
+
     public synchronized void removeDownloadedFile(String remotePath) {
         String localPath = downloadMap.remove(remotePath);
         if (localPath != null) {

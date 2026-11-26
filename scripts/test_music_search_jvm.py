@@ -52,9 +52,9 @@ main = root/'app/src/main/java/com/byron/davmusic'
 test = root/'app/src/test/java/com/byron/davmusic'
 production = ['WebDAVFile', 'FileUtils', 'ServerProfile', 'TrackSorter', 'SnapshotSearchEngine',
               'SnapshotSearchController', 'TrackIdentity', 'AtomicSnapshotWriter', 'LocalCacheManager',
-              'HttpDateParser', 'LrcParser', 'LyricsQuery']
+              'HttpDateParser', 'LrcParser', 'LyricsQuery', 'DirectoryDeletion']
 tests = ['SnapshotSearchEngineTest', 'SnapshotSearchControllerTest', 'TrackSorterTest',
-         'FileUtilsTest', 'HttpDateParserTest', 'LrcParserTest', 'LyricsQueryTest', 'AtomicSnapshotWriterTest']
+         'FileUtilsTest', 'HttpDateParserTest', 'LrcParserTest', 'LyricsQueryTest', 'AtomicSnapshotWriterTest', 'DirectoryDeletionTest']
 sources = [str(h/p) for p in stubs] + [str(main/(n+'.java')) for n in production]
 sources += [str(test/(n+'.java')) for n in tests + ['SnapshotSearchStorageChecks', 'AtomicSnapshotWriterChecks']]
 cp = ':'.join(str(h/n) for n in ['junit.jar', 'hamcrest.jar', 'json.jar'])

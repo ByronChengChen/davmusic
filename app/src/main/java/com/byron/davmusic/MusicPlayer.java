@@ -165,6 +165,23 @@ public class MusicPlayer {
      * 同一时刻最多只有一个，开销可忽略。
      */
     private android.media.MediaPlayer pendingReleasePlayer;
+    private String pendingReleaseCacheKey;
+    private String preloadedCacheKey;
+    private final java.util.Map<Integer,String> preparingCacheKeys = new java.util.HashMap<>();
+
+    /** Main-thread read only: paused/current, preparing, mounted and deferred-release audio. */
+    java.util.Set<String> localDeletionProtectedKeys() {
+        java.util.Set<String> keys = new java.util.HashSet<>();
+        if (playlist != null) {
+            for (int position : new int[]{currentPosition, preloadedPosition, preparingPosition}) {
+                if (position >= 0 && position < playlist.size()) keys.add(playlist.get(position).getCacheKey());
+            }
+        }
+        if (pendingReleaseCacheKey != null) keys.add(pendingReleaseCacheKey);
+        if (preloadedPlayer != null && preloadedCacheKey != null) keys.add(preloadedCacheKey);
+        keys.addAll(preparingCacheKeys.values());
+        return keys;
+    }
 
     public interface OnPlaybackListener {
         void onTrackChanged(WebDAVFile track);
@@ -688,6 +705,8 @@ public class MusicPlayer {
 
         String url = resolvePlayUrl(nextTrack);
         if (url == null || url.isEmpty()) return;
+        // Keep cancelled in-flight identities until their actual callback releases the descriptor.
+        preparingCacheKeys.put(gen, nextTrack.getCacheKey());
 
         android.media.MediaPlayer next = null;
         try {
@@ -701,6 +720,7 @@ public class MusicPlayer {
             if (url.startsWith("file://") || url.startsWith("/")) {
                 File f = new File(url.startsWith("file://") ? url.substring(7) : url);
                 if (!f.exists()) {
+                    preparingCacheKeys.remove(gen);
                     next.release();
                     return;
                 }
@@ -721,6 +741,7 @@ public class MusicPlayer {
 
             // 必须等 prepare 完成才能交给 setNextMediaPlayer
             next.setOnPreparedListener(prepared -> {
+                preparingCacheKeys.remove(gen);
                 try {
                     // 过期检查①：本次预加载是否已被取消/重挂（例如用户切了播放模式）。
                     // 注意这里要【先】判代号：过期说明已有更新的预加载接管了
@@ -748,6 +769,7 @@ public class MusicPlayer {
                     }
                     mediaPlayer.setNextMediaPlayer(prepared);
                     preloadedPlayer = prepared;
+                    preloadedCacheKey = nextTrack.getCacheKey();
                     // 记下"这一首在列表里的位置"：播完时按它推进索引，
                     // 随机模式下才能让界面与实际播放保持一致
                     preloadedPosition = nextPos;
@@ -764,6 +786,7 @@ public class MusicPlayer {
             });
 
             next.setOnErrorListener((mp, what, extra) -> {
+                // Conservatively retain a failed descriptor until the existing lifecycle releases it.
                 // 预加载实例在切歌时会被主动 release，必然回报错误；
                 // 这里只记调试日志，不上报 UI（用户不该看到预加载失败）
                 Log.d(TAG, "预加载播放器 onError（多为主动释放所致）: what="
@@ -776,6 +799,7 @@ public class MusicPlayer {
 
         } catch (Exception e) {
             Log.w(TAG, "预加载下一首失败（不影响当前播放）: " + e);
+            preparingCacheKeys.remove(gen);
             rlog.w(TAG, "预加载失败: " + e.getClass().getSimpleName()
                     + " / " + e.getMessage());
             if (next != null) {
@@ -1202,6 +1226,7 @@ public class MusicPlayer {
      * 用户看到的就是"选了单曲循环却还是跳走了"。
      */
     private void cancelPreloadedTrack() {
+        String cancelledKey = preloadedCacheKey;
         if (preloadedPlayer != null && mediaPlayer != null) {
             try {
                 mediaPlayer.setNextMediaPlayer(null);
@@ -1221,6 +1246,7 @@ public class MusicPlayer {
         if (preloadedPlayer != null) {
             recyclePendingRelease();
             pendingReleasePlayer = preloadedPlayer;
+            pendingReleaseCacheKey = cancelledKey;
             preloadedPlayer = null;
         }
     }
@@ -1233,6 +1259,7 @@ public class MusicPlayer {
             } catch (Exception ignored) {
             }
             pendingReleasePlayer = null;
+            pendingReleaseCacheKey = null;
         }
     }
 
